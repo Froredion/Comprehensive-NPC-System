@@ -332,6 +332,9 @@ function NPCRenderer.CreateVisual(npc, modelPath, renderData)
 		if npc:FindFirstChild("Humanoid") then
 			npc.Humanoid:BuildRigFromAttachments()
 		end
+
+		-- Setup BetterAnimate after rig is built
+		NPCAnimator.Setup(npc, nil, renderData.animatorOptions)
 	end)
 
 	if RenderConfig.DEBUG_MODE or RunService:IsStudio() then
@@ -638,6 +641,9 @@ function NPCRenderer.CleanupNPC(npc)
 			end
 		end
 	end
+
+	-- Cleanup animator
+	NPCAnimator.Cleanup(npc)
 
 	-- Remove from tracking
 	RenderedNPCs[npc] = nil
