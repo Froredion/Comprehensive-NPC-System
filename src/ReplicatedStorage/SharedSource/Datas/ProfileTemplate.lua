@@ -1,0 +1,4 @@
+local ProfileTemplate = {
+}
+
+return ProfileTemplate
