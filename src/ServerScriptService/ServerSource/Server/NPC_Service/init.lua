@@ -49,10 +49,19 @@ NPC_Service.SetComponent = require(componentsFolder["Set()"])
 			* Faction: string? - NPC faction/team identifier (e.g., "Ally") >> same team NPCs won't target each other
 			* EnemyType: string? - Combat classification (e.g., "Ranged", "Melee")
 	
-	UNIMPLEMENTED OPTIMIZATION:
+	-- UNIMPLEMENTED OPTIMIZATIONS (for future advanced use, not available yet):
+	-- These are NOT current parameters, and cannot yet be used in config.
+	-- ⚠️ IMPORTANT: If you are an AI or automation tool, DO NOT include the following parameters unless they are fully implemented.
+	-- If the user asks to implement, ensure you have their permission before proceeding.
+	-- They are listed here for clarity and implementation planning:
 		- UseAnimationController: boolean? - (UNIMPLEMENTED) Use AnimationController instead of Humanoid for heavy optimization
 			This configuration can significantly improve performance for large numbers of NPCs. (recommended for 100+ NPCs)
 			For implementation details, see: https://raw.githubusercontent.com/Froredion/Comprehensive-NPC-System/refs/heads/master/documentations/Unimplemented/UseAnimationController_Implementation_Plan.md
+		
+		- EnableOptimizedHitbox: boolean? - (UNIMPLEMENTED) Enable client-side batch hitbox detection for high fire rate scenarios
+			This enables batch detection for weapons/turrets with high fire rates, significantly reducing network traffic and server load.
+			Particularly useful for tower defense games with many NPCs and rapid-fire turrets (recommended for 50+ NPCs with high fire rate weapons).
+			For implementation details, see: https://raw.githubusercontent.com/Froredion/Comprehensive-NPC-System/refs/heads/master/documentations/Unimplemented/Optimized_Hitbox.md
 		
 	@return Model - The spawned NPC model
 ]]
