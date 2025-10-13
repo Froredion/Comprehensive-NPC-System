@@ -8,7 +8,7 @@ local RenderConfig = {
 	-- Toggle client-side rendering on/off
 	-- ⚠️ DISABLED BY DEFAULT - This is very confusing for beginners
 	-- For professionals: Enable this to optimize your game by offloading rendering to clients
-	ENABLED = true,
+	ENABLED = false,
 	
 	-- Only render NPCs within this distance (studs)
 	MAX_RENDER_DISTANCE = 500,
