@@ -603,15 +603,11 @@ function ClientPhysicsRenderer.SetupPositionSync(npcFolder, visualModel)
 
     if positionValue then
         -- Initial position
-        if visualModel.PrimaryPart then
-            visualModel:SetPrimaryPartCFrame(CFrame.new(positionValue.Value))
-        end
+        visualModel:PivotTo(CFrame.new(positionValue.Value))
 
         -- Track position updates
         positionValue.Changed:Connect(function(newPosition)
-            if visualModel.PrimaryPart then
-                visualModel:SetPrimaryPartCFrame(CFrame.new(newPosition))
-            end
+            visualModel:PivotTo(CFrame.new(newPosition))
         end)
     end
 
@@ -975,6 +971,328 @@ Network load: 95% reduction (playable)
 
 ---
 
+### **4. Client Disconnection Handling**
+
+#### **4.1: Overview**
+
+When a client that is simulating NPCs disconnects, those NPCs must be reassigned to other nearby clients. This system is designed to keep server load minimal - **clients handle the reassignment logic themselves**.
+
+**Key Principles:**
+- Server only tracks which client owns each NPC (lightweight)
+- Server broadcasts "owner left" events (minimal work)
+- Clients compete to claim orphaned NPCs based on distance
+- No server-side simulation fallback (maintains zero server physics)
+
+#### **4.2: Server-Side Ownership Tracking**
+
+**Location**: `NPC_Service/Components/Others/ClientPhysicsSync.lua`
+
+Add ownership tracking to the existing sync system:
+
+```lua
+-- Track which client is simulating each NPC
+local NPCOwnership = {}  -- [npcID] = Player
+
+-- Track last update time for timeout detection
+local LastUpdateTimes = {}  -- [npcID] = tick()
+
+-- Timeout threshold (seconds) - if no update received, NPC is orphaned
+local OWNERSHIP_TIMEOUT = 3.0
+
+--[[
+    Called when client claims ownership of an NPC
+    Server just records this - no validation (minimal load)
+]]
+function ClientPhysicsSync.ClaimNPC(player: Player, npcID: string)
+    -- Simple ownership assignment - no complex logic
+    NPCOwnership[npcID] = player
+    LastUpdateTimes[npcID] = tick()
+end
+
+--[[
+    Called when client releases an NPC (intentional handoff)
+]]
+function ClientPhysicsSync.ReleaseNPC(player: Player, npcID: string)
+    if NPCOwnership[npcID] == player then
+        NPCOwnership[npcID] = nil
+        LastUpdateTimes[npcID] = nil
+
+        -- Broadcast that this NPC needs a new owner
+        ClientPhysicsSync.BroadcastOrphanedNPC(npcID)
+    end
+end
+
+--[[
+    Handle player disconnection
+    Called from Players.PlayerRemoving
+]]
+function ClientPhysicsSync.HandlePlayerLeft(player: Player)
+    local orphanedNPCs = {}
+
+    -- Find all NPCs owned by this player
+    for npcID, owner in pairs(NPCOwnership) do
+        if owner == player then
+            NPCOwnership[npcID] = nil
+            LastUpdateTimes[npcID] = nil
+            table.insert(orphanedNPCs, npcID)
+        end
+    end
+
+    -- Broadcast orphaned NPCs to all remaining clients
+    -- Clients will compete to claim them based on distance
+    if #orphanedNPCs > 0 then
+        ClientPhysicsSync.BroadcastOrphanedNPCs(orphanedNPCs)
+    end
+end
+
+--[[
+    Broadcast orphaned NPCs to nearby clients
+    Server does minimal work - just sends the list
+]]
+function ClientPhysicsSync.BroadcastOrphanedNPCs(npcIDs: {string})
+    local NPCService = require(script.Parent.Parent.Parent)
+
+    -- Get positions for distance-based claiming
+    local npcPositions = {}
+    for _, npcID in ipairs(npcIDs) do
+        local npcFolder = ReplicatedStorage.ActiveNPCs:FindFirstChild(npcID)
+        if npcFolder and npcFolder:FindFirstChild("Position") then
+            npcPositions[npcID] = npcFolder.Position.Value
+        end
+    end
+
+    -- Fire to all clients - they decide if they should claim
+    NPCService.Client.NPCsOrphaned:FireAll(npcPositions)
+end
+
+--[[
+    Broadcast single orphaned NPC
+]]
+function ClientPhysicsSync.BroadcastOrphanedNPC(npcID: string)
+    ClientPhysicsSync.BroadcastOrphanedNPCs({npcID})
+end
+```
+
+#### **4.3: Client-Side Claiming System**
+
+**Location**: `NPC_Controller/Components/Others/ClientNPCManager.lua`
+
+Add claiming logic to handle orphaned NPCs:
+
+```lua
+local CLAIM_DELAY_BASE = 0.1  -- Base delay before claiming (seconds)
+local CLAIM_DELAY_PER_STUD = 0.001  -- Additional delay per stud of distance
+
+--[[
+    Listen for orphaned NPC broadcasts
+    Clients compete to claim based on distance (closer = faster claim)
+]]
+function ClientNPCManager.ListenForOrphanedNPCs()
+    local NPC_Service = Knit.GetService("NPC_Service")
+
+    NPC_Service.NPCsOrphaned:Connect(function(npcPositions: {[string]: Vector3})
+        ClientNPCManager.HandleOrphanedNPCs(npcPositions)
+    end)
+end
+
+--[[
+    Handle orphaned NPCs - claim those within range
+    Uses distance-based delay so closest client claims first
+]]
+function ClientNPCManager.HandleOrphanedNPCs(npcPositions: {[string]: Vector3})
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer.Character or not localPlayer.Character.PrimaryPart then
+        return
+    end
+
+    local playerPos = localPlayer.Character.PrimaryPart.Position
+    local simulationDistance = OptimizationConfig.ClientSimulation.SIMULATION_DISTANCE
+    local maxSimulated = OptimizationConfig.ClientSimulation.MAX_SIMULATED_PER_CLIENT
+
+    for npcID, npcPos in pairs(npcPositions) do
+        local distance = (playerPos - npcPos).Magnitude
+
+        -- Only attempt to claim if within simulation distance
+        if distance <= simulationDistance then
+            -- Check if we have capacity
+            local currentCount = 0
+            for _ in pairs(SimulatedNPCs) do
+                currentCount = currentCount + 1
+            end
+
+            if currentCount < maxSimulated then
+                -- Distance-based delay: closer clients claim faster
+                local claimDelay = CLAIM_DELAY_BASE + (distance * CLAIM_DELAY_PER_STUD)
+
+                task.delay(claimDelay, function()
+                    ClientNPCManager.AttemptClaimNPC(npcID, npcPos)
+                end)
+            end
+        end
+    end
+end
+
+--[[
+    Attempt to claim an orphaned NPC
+    Server accepts first valid claim (no complex arbitration)
+]]
+function ClientNPCManager.AttemptClaimNPC(npcID: string, lastKnownPos: Vector3)
+    -- Check if already being simulated by us
+    if SimulatedNPCs[npcID] then
+        return
+    end
+
+    -- Check if NPC still exists
+    local npcFolder = ReplicatedStorage.ActiveNPCs:FindFirstChild(npcID)
+    if not npcFolder then
+        return
+    end
+
+    -- Check if already claimed by checking for recent position updates
+    local positionValue = npcFolder:FindFirstChild("Position")
+    if positionValue then
+        -- If position changed from last known, someone else claimed it
+        local currentPos = positionValue.Value
+        if (currentPos - lastKnownPos).Magnitude > 1 then
+            -- Another client already claimed and moved it
+            return
+        end
+    end
+
+    -- Claim the NPC
+    local NPC_Service = Knit.GetService("NPC_Service")
+    NPC_Service:ClaimNPC(npcID)
+
+    -- Start simulating
+    ClientNPCManager.StartSimulation(npcFolder)
+end
+
+--[[
+    Release NPCs when player is leaving or moving away
+]]
+function ClientNPCManager.ReleaseNPC(npcID: string)
+    if SimulatedNPCs[npcID] then
+        -- Notify server
+        local NPC_Service = Knit.GetService("NPC_Service")
+        NPC_Service:ReleaseNPC(npcID)
+
+        -- Stop local simulation
+        ClientNPCManager.StopSimulation(npcID)
+    end
+end
+
+--[[
+    Graceful handoff when moving away from NPCs
+    Called periodically from DistanceCheckLoop
+]]
+function ClientNPCManager.CheckForHandoff()
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer.Character or not localPlayer.Character.PrimaryPart then
+        return
+    end
+
+    local playerPos = localPlayer.Character.PrimaryPart.Position
+    local simulationDistance = OptimizationConfig.ClientSimulation.SIMULATION_DISTANCE
+    local handoffDistance = simulationDistance * 1.5  -- Hysteresis
+
+    for npcID, npcData in pairs(SimulatedNPCs) do
+        local distance = (playerPos - npcData.Position).Magnitude
+
+        -- Release if too far away
+        if distance > handoffDistance then
+            ClientNPCManager.ReleaseNPC(npcID)
+        end
+    end
+end
+```
+
+#### **4.4: Knit Service Additions**
+
+**Location**: `NPC_Service/init.lua`
+
+Add the new signals and methods:
+
+```lua
+local NPC_Service = Knit.CreateService({
+    Name = "NPC_Service",
+    Client = {
+        NPCPositionUpdated = Knit.CreateSignal(),
+        NPCsOrphaned = Knit.CreateSignal(),  -- NEW: Broadcast orphaned NPCs
+    },
+})
+
+function NPC_Service:KnitInit()
+    -- ... existing init code ...
+
+    -- Handle player leaving
+    Players.PlayerRemoving:Connect(function(player)
+        ClientPhysicsSync.HandlePlayerLeft(player)
+    end)
+end
+
+-- Client methods for claiming/releasing
+function NPC_Service.Client:ClaimNPC(player: Player, npcID: string)
+    ClientPhysicsSync.ClaimNPC(player, npcID)
+end
+
+function NPC_Service.Client:ReleaseNPC(player: Player, npcID: string)
+    ClientPhysicsSync.ReleaseNPC(player, npcID)
+end
+```
+
+#### **4.5: Timeout Detection (Optional Heartbeat)**
+
+For cases where a client crashes without proper disconnection, add optional timeout detection. This runs infrequently to minimize server load:
+
+```lua
+-- Run every 5 seconds (very low server load)
+local TIMEOUT_CHECK_INTERVAL = 5.0
+
+function ClientPhysicsSync.StartTimeoutChecker()
+    task.spawn(function()
+        while true do
+            task.wait(TIMEOUT_CHECK_INTERVAL)
+            ClientPhysicsSync.CheckForTimeouts()
+        end
+    end)
+end
+
+function ClientPhysicsSync.CheckForTimeouts()
+    local now = tick()
+    local orphanedNPCs = {}
+
+    for npcID, lastUpdate in pairs(LastUpdateTimes) do
+        if now - lastUpdate > OWNERSHIP_TIMEOUT then
+            -- NPC hasn't received updates - owner likely crashed
+            NPCOwnership[npcID] = nil
+            LastUpdateTimes[npcID] = nil
+            table.insert(orphanedNPCs, npcID)
+        end
+    end
+
+    if #orphanedNPCs > 0 then
+        ClientPhysicsSync.BroadcastOrphanedNPCs(orphanedNPCs)
+    end
+end
+```
+
+#### **4.6: Server Load Analysis**
+
+**Server work when client disconnects:**
+1. Loop through ownership table: O(n) where n = NPCs owned by that player
+2. Collect orphaned NPC IDs: Simple table insert
+3. Fire signal to all clients: Single network call
+
+**Server does NOT:**
+- Simulate any NPC physics
+- Calculate which client should take over
+- Validate claims (first come, first served)
+- Run complex arbitration logic
+
+**Result:** Minimal server impact even with 1000+ NPCs
+
+---
+
 ## 🔧 **Configuration Structure**
 
 ### **Configuration File Location**
@@ -1204,7 +1522,14 @@ end
 - [ ] Implement position synchronization to server via Knit signal
 - [ ] Implement server-side distance-based broadcasting (only send to nearby clients)
 - [ ] ~~Add position validation~~ - REMOVED (causes false positives)
-- [ ] Setup Knit service signals (UpdateNPCPosition, NPCPositionUpdated)
+- [ ] Setup Knit service signals (UpdateNPCPosition, NPCPositionUpdated, NPCsOrphaned)
+- [ ] Implement ownership tracking (NPCOwnership table)
+- [ ] Implement ClaimNPC/ReleaseNPC methods
+- [ ] Setup Players.PlayerRemoving handler for disconnection
+- [ ] Implement client-side orphaned NPC listener
+- [ ] Implement distance-based claiming with delay (closer = faster)
+- [ ] Implement graceful handoff when player moves away (CheckForHandoff)
+- [ ] Add timeout detection for crashed clients (optional heartbeat check)
 
 ### **Phase 3: Client-Side Pathfinding (NoobPath)**
 
@@ -1672,6 +1997,18 @@ The `UseAnimationController` optimization is a **powerful but risky** feature th
 
 ## 📝 **Recent Updates**
 
+### Version 1.2 (2025-11-28)
+
+- **Client disconnection handling**: Added comprehensive system for NPC reassignment when simulating client leaves
+  - Server-side ownership tracking (lightweight - just a table lookup)
+  - `ClaimNPC`/`ReleaseNPC` methods for ownership management
+  - `NPCsOrphaned` Knit signal broadcasts orphaned NPCs to remaining clients
+  - Distance-based claiming: closer clients claim faster (delay = base + distance × factor)
+  - Graceful handoff when player moves away from NPCs
+  - Optional timeout detection for crashed clients (runs every 5 seconds)
+  - Zero server physics simulation maintained - clients handle all reassignment logic
+- **Fixed deprecated API**: Replaced `SetPrimaryPartCFrame` with `PivotTo` in ClientPhysicsRenderer
+
 ### Version 1.1 (2025-10-12)
 
 - **Removed duplicate configurations**: Rendering settings now exclusively in `RenderConfig.lua`
@@ -1689,6 +2026,6 @@ The `UseAnimationController` optimization is a **powerful but risky** feature th
 
 ---
 
-**Document Version**: 1.1  
-**Last Updated**: 2025-10-12  
+**Document Version**: 1.2
+**Last Updated**: 2025-11-28
 **Status**: Implementation Plan (Updated - Ready for Implementation)
