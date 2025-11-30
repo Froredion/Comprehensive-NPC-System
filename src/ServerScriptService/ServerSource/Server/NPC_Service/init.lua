@@ -5,6 +5,7 @@ local Knit = require(ReplicatedStorage.Packages.Knit)
 
 local NPC_Service = Knit.CreateService({
 	Name = "NPC_Service",
+	Instance = script,
 	Client = {
 		-- Signals for UseAnimationController client-physics system
 		NPCPositionUpdated = Knit.CreateSignal(), -- Broadcast NPC position updates to nearby clients
@@ -20,18 +21,6 @@ local NPC_Service = Knit.CreateService({
 
 ---- Configuration
 local OptimizationConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.OptimizationConfig)
-
----- Components
---- component utilities
-local componentsInitializer = require(ReplicatedStorage.SharedSource.Utilities.ScriptsLoader.ComponentsInitializer)
---- component folders
-local componentsFolder = script:WaitForChild("Components", 5)
-NPC_Service.Components = {}
-for _, v in pairs(componentsFolder:WaitForChild("Others", 10):GetChildren()) do
-	NPC_Service.Components[v.Name] = require(v)
-end
-NPC_Service.GetComponent = require(componentsFolder["Get()"])
-NPC_Service.SetComponent = require(componentsFolder["Set()"])
 
 ---- Knit Services
 -- No external services needed for core functionality
@@ -224,8 +213,6 @@ function NPC_Service:KnitStart()
 end
 
 function NPC_Service:KnitInit()
-	---- Components Initializer
-	componentsInitializer(script)
 
 	---- Handle player disconnection for UseAnimationController system
 	Players.PlayerRemoving:Connect(function(player)

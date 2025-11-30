@@ -289,7 +289,26 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 	if hrp and positionValue then
 		local renderSteppedConnection = RunService.RenderStepped:Connect(function()
 			if visualModel and visualModel.Parent and hrp and hrp.Parent then
+				--[[
+					POSITION SOURCE PRIORITY:
+					-------------------------
+					1. If this client is simulating the NPC, read directly from npcData.Position
+					   - This avoids 1-frame delay from positionValue.Value replication
+					   - Eliminates stutter caused by RenderStepped timing race
+					2. Otherwise, read from positionValue.Value (remote NPC)
+					   - NPCs simulated by other clients use network-replicated values
+				]]
 				local targetPosition = positionValue.Value
+				local ClientNPCManagerModule = script.Parent:FindFirstChild("ClientNPCManager")
+				if ClientNPCManagerModule then
+					local manager = require(ClientNPCManagerModule)
+					local npcData = manager.GetSimulatedNPC(npcID)
+					if npcData then
+						-- Use direct position from simulation (no delay)
+						targetPosition = npcData.Position
+					end
+				end
+
 				local targetRotation = orientationValue and orientationValue.Value.Rotation or CFrame.identity
 				hrp.CFrame = CFrame.new(targetPosition) * targetRotation
 			end
@@ -316,31 +335,20 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 		-- Setup BetterAnimate if available
 		if NPCAnimator then
 			task.spawn(function()
-				-- [NPCADBG] Check if this is tracked NPC
-				local ClientNPCManagerModule = script.Parent:FindFirstChild("ClientNPCManager")
-				local isTracked = false
-				if ClientNPCManagerModule then
-					local manager = require(ClientNPCManagerModule)
-					isTracked = (manager.NPCADBG_TrackedNPC == npcID)
-				end
-
-				if isTracked then print("[NPCADBG] Renderer: Waiting 0.5s before NPCAnimator.Setup") end
 				task.wait(0.5) -- Wait for model to settle
 
 				-- Get npcData from ClientNPCManager for UseAnimationController support
+				local ClientNPCManagerModule = script.Parent:FindFirstChild("ClientNPCManager")
 				local npcData = nil
 				if ClientNPCManagerModule then
 					local manager = require(ClientNPCManagerModule)
 					npcData = manager.GetSimulatedNPC(npcID)
-					if isTracked then print("[NPCADBG] Renderer: GetSimulatedNPC returned:", npcData ~= nil and "HAS_DATA" or "NIL") end
 				end
 
 				-- Build options with npcData for UseAnimationController mode
 				local animatorOptions = config.ClientRenderData and config.ClientRenderData.animatorOptions or {}
 				animatorOptions.npcData = npcData
-				animatorOptions._NPCADBG_IsTracked = isTracked -- Pass tracking flag
 
-				if isTracked then print("[NPCADBG] Renderer: Calling NPCAnimator.Setup with npcData:", npcData ~= nil) end
 				NPCAnimator.Setup(visualModel, nil, animatorOptions)
 			end)
 		end

@@ -1,10 +1,49 @@
 --[[
 	ClientPathfinding - NoobPath wrapper for client-side NPC pathfinding
 
+	ARCHITECTURE OVERVIEW:
+	----------------------
 	This mirrors the server-side PathfindingManager but runs on the client
-	for UseAnimationController NPCs.
+	for UseAnimationController NPCs with custom physics.
 
-	Uses the same NoobPath library for consistent behavior.
+	KEY DIFFERENCES FROM SERVER:
+	-----------------------------
+	Server (PathfindingManager):
+	- Uses NoobPath in NORMAL mode (automatic Humanoid movement)
+	- NoobPath calls Humanoid:MoveTo() to move NPCs
+	- Physical HumanoidRootPart exists on server
+	- Roblox physics engine handles collision
+
+	Client (ClientPathfinding):
+	- Uses NoobPath in MANUAL mode (compute paths only)
+	- NoobPath does NOT move the visual model
+	- ClientNPCSimulator reads waypoints and updates npcData.Position
+	- ClientPhysicsRenderer syncs visual model to npcData.Position
+	- No physics - purely visual positioning
+
+	HOW IT WORKS:
+	-------------
+	1. ClientPathfinding.CreatePath() creates NoobPath with ManualMovement=true
+	2. ClientPathfinding.RunPath() starts path computation
+	3. NoobPath generates waypoints but doesn't move anything
+	4. ClientNPCSimulator reads current waypoint via GetWaypoint()
+	5. ClientNPCSimulator updates npcData.Position toward waypoint
+	6. When close enough, ClientNPCSimulator calls AdvanceWaypoint()
+	7. Repeat steps 4-6 until destination reached
+
+	VISUAL MODEL SYNC:
+	------------------
+	The visual model is NOT moved by pathfinding directly:
+	- npcData.Position is the source of truth
+	- ClientPhysicsRenderer syncs visual model CFrame to npcData.Position every RenderStepped
+	- This keeps pathfinding logic separate from rendering
+
+	BACKWARDS COMPATIBILITY:
+	------------------------
+	Server-side NPCs continue using PathfindingManager (normal NoobPath mode).
+	This code ONLY affects client-side NPCs with UseAnimationController=true.
+
+	Uses the same NoobPath library for consistent pathfinding behavior.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -37,14 +76,20 @@ function ClientPathfinding.CreatePath(npcData, visualModel)
 	-- Get pathfinding config
 	local pathConfig = OptimizationConfig.ClientPathfinding
 
-	-- Create NoobPath instance (same pattern as PathfindingManager)
-	local path = NoobPath.Humanoid(visualModel, {
-		AgentRadius = pathConfig.AGENT_RADIUS,
-		AgentHeight = pathConfig.AGENT_HEIGHT,
-		AgentCanJump = pathConfig.AGENT_CAN_JUMP,
-		WaypointSpacing = pathConfig.WAYPOINT_SPACING,
-		Costs = pathConfig.TERRAIN_COSTS,
-	})
+	-- Create NoobPath instance with manual movement mode
+	-- ManualMovement = true means NoobPath only computes paths, doesn't move the model
+	local path = NoobPath.Humanoid(
+		visualModel,
+		{
+			AgentRadius = pathConfig.AGENT_RADIUS,
+			AgentHeight = pathConfig.AGENT_HEIGHT,
+			AgentCanJump = pathConfig.AGENT_CAN_JUMP,
+			WaypointSpacing = pathConfig.WAYPOINT_SPACING,
+			Costs = pathConfig.TERRAIN_COSTS,
+		},
+		false, -- Precise (not needed for manual movement)
+		true -- ManualMovement mode (only compute paths, don't auto-move)
+	)
 
 	-- Configure path settings
 	path.Timeout = true -- Enable timeout detection
@@ -76,6 +121,15 @@ function ClientPathfinding.CreatePath(npcData, visualModel)
 		ClientPathfinding.HandlePathBlocked(npcData, visualModel, reason)
 	end)
 
+	-- Setup reached detection (destination arrived)
+	path.Reached:Connect(function(waypoint, partial)
+		-- In manual mode, Reached shouldn't clear destination until we confirm arrival
+		-- The simulator will clear it when actually at destination
+		if not npcData.Pathfinding or not npcData.Pathfinding.ManualMovement then
+			npcData.Destination = nil
+		end
+	end)
+
 	return path
 end
 
@@ -87,13 +141,23 @@ end
 ]]
 function ClientPathfinding.HandlePathError(npcData, errorType)
 	if errorType == "ComputationError" then
-		warn("[ClientPathfinding] Computation error for NPC:", npcData.ID)
-		npcData.Destination = nil
+		-- Computation failed - clear destination after retries
+		npcData._pathErrorCount = (npcData._pathErrorCount or 0) + 1
+		if npcData._pathErrorCount > 3 then
+			npcData.Destination = nil
+			npcData._pathErrorCount = 0
+		end
 	elseif errorType == "TargetUnreachable" then
-		-- Target is unreachable, clear destination
-		npcData.Destination = nil
+		-- Target unreachable - this might be a false positive due to async pathfinding
+		-- Don't clear destination immediately, let rate limiting handle retries
+		npcData._pathUnreachableCount = (npcData._pathUnreachableCount or 0) + 1
+
+		-- Only clear after multiple consecutive failures
+		if npcData._pathUnreachableCount > 5 then
+			npcData.Destination = nil
+			npcData._pathUnreachableCount = 0
+		end
 	elseif errorType == "AgentStuck" then
-		-- Agent is stuck, try to unstuck
 		npcData.Destination = nil
 	end
 end
@@ -131,12 +195,37 @@ end
 	@param destination Vector3 - Target destination
 ]]
 function ClientPathfinding.RunPath(npcData, visualModel, destination)
+	-- Convert destination to ground-level coordinates (NoobPath expects Y ≈ 0)
+	-- Pathfinding works on ground plane, not character height
+	local groundDestination = Vector3.new(destination.X, 0, destination.Z)
+
 	if not npcData.Pathfinding then
 		npcData.Pathfinding = ClientPathfinding.CreatePath(npcData, visualModel)
 	end
 
 	if npcData.Pathfinding then
-		npcData.Pathfinding:Run(destination)
+		npcData.Pathfinding:Run(groundDestination)
+
+		-- Reset error counters on successful path start
+		if not npcData.Pathfinding.Idle and #npcData.Pathfinding.Route > 0 then
+			npcData._pathErrorCount = 0
+			npcData._pathUnreachableCount = 0
+		end
+
+		--[[
+			FIX: Manual movement mode index correction
+
+			NoobPath:Run() calls TravelNextWaypoint() which increments Index from 1 to 2,
+			skipping the first waypoint. In normal mode this is fine (Humanoid physics
+			handles it), but in manual mode we need to read waypoints sequentially.
+
+			Reset Index to 1 so GetWaypoint() returns the actual first waypoint.
+			This ensures the NPC moves toward Route[1] instead of trying to reach
+			Route[2] without going through Route[1] first.
+		]]
+		if npcData.Pathfinding.ManualMovement and not npcData.Pathfinding.Idle then
+			npcData.Pathfinding.Index = 1
+		end
 	end
 end
 

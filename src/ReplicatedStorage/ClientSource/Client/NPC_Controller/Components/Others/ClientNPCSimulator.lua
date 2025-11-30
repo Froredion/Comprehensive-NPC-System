@@ -1,13 +1,56 @@
 --[[
 	ClientNPCSimulator - Core simulation logic for UseAnimationController NPCs
 
-	Handles:
-	- Movement simulation (walking toward destinations)
-	- Idle wandering behavior
-	- Combat movement (if target exists)
-	- Integration with ClientPathfinding and ClientJumpSimulator
+	ARCHITECTURE OVERVIEW:
+	----------------------
+	This is the BRAIN of client-side NPC simulation. It handles all movement logic,
+	integrates with pathfinding, and updates npcData.Position (the source of truth).
 
-	This runs the actual simulation logic each Heartbeat.
+	SIMULATION LOOP:
+	----------------
+	Called by ClientNPCManager every RenderStepped (~60-144 FPS):
+	1. SimulateNPC() - Main entry point, determines current behavior
+	2. SimulateMovement() - Move toward destination using pathfinding
+	3. SimulateCombatMovement() - Chase target using pathfinding
+	4. SimulateIdleWander() - Random wandering when idle
+	5. SimulateJump() - Jump physics (gravity simulation)
+
+	PATHFINDING INTEGRATION:
+	-------------------------
+	Uses ClientPathfinding (NoobPath in manual mode):
+	- NoobPath computes waypoints but doesn't move the NPC
+	- This simulator reads waypoints via GetWaypoint()
+	- Manually moves npcData.Position toward current waypoint
+	- Advances to next waypoint when within 2 studs (XZ distance only!)
+	- Triggers jumps when waypoint.Action == Jump
+
+	IMPORTANT: 2D DISTANCE CALCULATION
+	-----------------------------------
+	We calculate waypoint distance in 2D (XZ plane), NOT 3D (XYZ).
+	Waypoints are at ground level (Y≈0), but NPCs have height offset (~3 studs).
+	Using 3D distance would cause NPCs to never reach waypoints (always 3 studs away).
+	See detailed comment in SimulateMovement() for full explanation.
+
+	DATA FLOW:
+	----------
+	1. ClientNPCSimulator updates npcData.Position (this file)
+	2. ClientNPCManager writes to positionValue in ReplicatedStorage
+	3. ClientPhysicsRenderer reads positionValue and syncs visual model CFrame
+
+	npcData.Position is the SINGLE SOURCE OF TRUTH for NPC position.
+
+	FRAME TIMING:
+	-------------
+	- Runs on RenderStepped (primary) for smooth movement
+	- Falls back to Heartbeat when player alt-tabs
+	- See ClientNPCManager.Initialize() for dual-loop implementation
+
+	COMPONENTS USED:
+	----------------
+	- ClientPathfinding: Provides waypoint-based pathfinding
+	- ClientJumpSimulator: Handles jump physics
+	- ClientMovement: Movement calculations and combat positioning
+	- OptimizationConfig: Configuration values
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,6 +70,7 @@ local STUCK_TIME_THRESHOLD = 2.0 -- seconds before triggering unstuck behavior
 local WANDER_COOLDOWN = 3.0 -- seconds between wander attempts
 local WANDER_RADIUS_MIN = 10
 local WANDER_RADIUS_MAX = 30
+
 
 --[[
 	Calculate the height offset from ground to HumanoidRootPart center
@@ -87,13 +131,12 @@ end
 	Cleanup an NPC when simulation ends
 ]]
 function ClientNPCSimulator.CleanupNPC(npcData)
-	-- Stop pathfinding
-	if ClientPathfinding and npcData.Pathfinding then
-		ClientPathfinding.StopPath(npcData)
+	-- Stop and cleanup pathfinding completely
+	if ClientPathfinding then
+		ClientPathfinding.Cleanup(npcData)
 	end
 
 	-- Clear references
-	npcData.Pathfinding = nil
 	npcData.VisualModel = nil
 end
 
@@ -139,49 +182,169 @@ function ClientNPCSimulator.SimulateNPC(npcData, deltaTime)
 end
 
 --[[
-	Simulate movement toward destination
+	Simulate movement toward destination using pathfinding waypoints
 ]]
 function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 	if not npcData.Destination then
 		return
 	end
 
-	local currentPos = npcData.Position
-	local targetPos = npcData.Destination
+	-- Use pathfinding if available
+	if ClientPathfinding and npcData.VisualModel and npcData.Pathfinding then
+		-- Check if we need to start/restart pathfinding
+		local needsPathfinding = npcData.Pathfinding.Idle
 
-	-- Calculate direction (flatten Y for ground movement)
-	local direction = targetPos - currentPos
-	direction = Vector3.new(direction.X, 0, direction.Z)
+		-- Rate limit: Prevent spamming Run() calls
+		if needsPathfinding then
+			local now = tick()
+			local lastRunTime = npcData._lastPathRunTime or 0
+			local timeSinceLastRun = now - lastRunTime
 
-	local distance = direction.Magnitude
+			-- Only call Run() if we haven't called it in the last 1 second
+			if timeSinceLastRun > 1.0 then
+				-- Set timestamp BEFORE calling RunPath to prevent race conditions
+				npcData._lastPathRunTime = now
+				ClientPathfinding.RunPath(npcData, npcData.VisualModel, npcData.Destination)
+			else
+				-- Don't proceed with waypoint movement if we're still waiting for path
+				return
+			end
+		end
 
-	-- Check if we've reached destination
-	if distance < 2 then
-		npcData.Destination = nil
-		npcData.MovementState = "Idle"
-		return
+		-- Check if destination was cleared (e.g., by pathfinding error)
+		if not npcData.Destination then
+			return
+		end
+
+		local currentPos = npcData.Position
+
+		-- Get current waypoint from NoobPath
+		local waypoint = npcData.Pathfinding:GetWaypoint()
+		if waypoint then
+			local waypointPos = waypoint.Position
+
+			--[[
+				WAYPOINT DISTANCE CALCULATION - IMPORTANT!
+
+				We calculate distance in 2D (XZ plane) instead of 3D (XYZ).
+
+				WHY?
+				-----
+				Pathfinding waypoints are at ground level (Y ≈ 0), but NPCs have a height offset:
+				- HipHeight (usually ~2 studs for R15)
+				- + RootPart.Size.Y / 2 (usually ~1 stud)
+				- = Total offset of ~3 studs above ground
+
+				PROBLEM WITH 3D DISTANCE:
+				--------------------------
+				If we use 3D distance:
+				  waypoint = (63.82, 0, 92.81)      ← Ground level
+				  npcPos   = (63.82, 3, 92.81)      ← 3 studs above ground
+				  distance = sqrt((0-3)^2) = 3      ← Always 3, even when directly above!
+
+				The NPC would never get "close enough" (< 2 studs) to advance waypoints.
+
+				SOLUTION - 2D DISTANCE (XZ PLANE):
+				-----------------------------------
+				Flatten both positions to same Y level:
+				  waypointFlat = (63.82, 3, 92.81)  ← Use NPC's Y
+				  npcPos       = (63.82, 3, 92.81)
+				  distance     = 0                  ← Can actually reach!
+
+				This allows NPCs to advance through waypoints based on horizontal distance only.
+
+				DO NOT CHANGE THIS unless you also update waypoint Y positions to include height offset!
+			]]
+			local waypointPosFlat = Vector3.new(waypointPos.X, currentPos.Y, waypointPos.Z)
+			local distanceToWaypoint = (currentPos - waypointPosFlat).Magnitude
+
+			-- If close enough to current waypoint, advance to next (2 stud threshold)
+			if distanceToWaypoint < 2 then
+				local advanced = npcData.Pathfinding:AdvanceWaypoint()
+
+				-- Check if we reached the end of the path
+				if not advanced then
+					-- This was the final waypoint - check if we're close enough to stop
+					-- Use a smaller threshold (0.5 studs) to ensure NPC reaches destination
+					if distanceToWaypoint < 0.5 then
+						npcData.Destination = nil
+						npcData.MovementState = "Idle"
+						ClientPathfinding.StopPath(npcData)
+						return
+					end
+					-- Otherwise, keep moving toward the final waypoint
+				else
+					-- Get the new waypoint after advancing
+					waypoint = npcData.Pathfinding:GetWaypoint()
+					waypointPos = waypoint.Position
+				end
+			end
+
+			-- Move toward current waypoint
+			local direction = waypointPos - currentPos
+			direction = Vector3.new(direction.X, 0, direction.Z)
+
+			if direction.Magnitude > 0.1 then
+				direction = direction.Unit
+				local walkSpeed = npcData.Config.WalkSpeed or 16
+				local movement = direction * walkSpeed * deltaTime
+
+				-- Update orientation to face waypoint
+				npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
+
+				-- Apply movement
+				local newPosition = currentPos + movement
+				newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
+
+				npcData.Position = newPosition
+			end
+
+			-- Check if waypoint requires jump
+			if waypoint.Action == Enum.PathWaypointAction.Jump and not npcData.IsJumping then
+				ClientNPCSimulator.TriggerJump(npcData)
+			end
+		end
+
+		npcData.MovementState = "Moving"
+	else
+		-- Fallback: direct movement (no collision avoidance)
+		local currentPos = npcData.Position
+		local targetPos = npcData.Destination
+
+		-- Calculate direction (flatten Y for ground movement)
+		local direction = targetPos - currentPos
+		direction = Vector3.new(direction.X, 0, direction.Z)
+
+		local distance = direction.Magnitude
+
+		-- Check if we've reached destination
+		if distance < 2 then
+			npcData.Destination = nil
+			npcData.MovementState = "Idle"
+			return
+		end
+
+		-- Normalize and apply speed
+		direction = direction.Unit
+		local walkSpeed = npcData.Config.WalkSpeed or 16
+		local movement = direction * walkSpeed * deltaTime
+
+		-- Update orientation FIRST (before movement) to face movement direction
+		npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
+
+		-- Apply movement
+		local newPosition = currentPos + movement
+
+		-- Ground check with proper height calculation
+		newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
+
+		npcData.Position = newPosition
+		npcData.MovementState = "Moving"
 	end
-
-	-- Normalize and apply speed
-	direction = direction.Unit
-	local walkSpeed = npcData.Config.WalkSpeed or 16
-	local movement = direction * walkSpeed * deltaTime
-
-	-- Update orientation FIRST (before movement) to face movement direction
-	npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
-
-	-- Apply movement
-	local newPosition = currentPos + movement
-
-	-- Ground check with proper height calculation
-	newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
-
-	npcData.Position = newPosition
-	npcData.MovementState = "Moving"
 end
 
 --[[
-	Simulate combat movement toward target
+	Simulate combat movement toward target using pathfinding waypoints
 ]]
 function ClientNPCSimulator.SimulateCombatMovement(npcData, deltaTime)
 	local target = npcData.CurrentTarget
@@ -198,6 +361,9 @@ function ClientNPCSimulator.SimulateCombatMovement(npcData, deltaTime)
 	local currentPos = npcData.Position
 	local targetPos = targetPart.Position
 
+	-- Store last known position for when we lose sight
+	npcData.LastKnownTargetPos = targetPos
+
 	-- Calculate desired distance based on movement mode
 	local desiredDistance = 0
 	if npcData.Config.MovementMode == "Melee" then
@@ -211,9 +377,15 @@ function ClientNPCSimulator.SimulateCombatMovement(npcData, deltaTime)
 	direction = Vector3.new(direction.X, 0, direction.Z)
 	local distance = direction.Magnitude
 
-	-- If within desired distance, stop
+	-- If within desired distance, stop pathfinding
 	if distance <= desiredDistance then
 		npcData.MovementState = "Combat"
+
+		-- Stop pathfinding if active
+		if ClientPathfinding then
+			ClientPathfinding.StopPath(npcData)
+		end
+
 		-- Face target
 		if direction.Magnitude > 0.1 then
 			npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction.Unit)
@@ -221,25 +393,117 @@ function ClientNPCSimulator.SimulateCombatMovement(npcData, deltaTime)
 		return
 	end
 
-	-- Move toward target
-	direction = direction.Unit
-	local walkSpeed = npcData.Config.WalkSpeed or 16
-	local movement = direction * walkSpeed * deltaTime
+	-- Use pathfinding for combat movement if available
+	if ClientPathfinding and npcData.VisualModel and npcData.Pathfinding then
+		-- Calculate combat position to path toward
+		local combatPosition = targetPos - direction.Unit * desiredDistance
 
-	-- Update orientation FIRST (before movement) to face movement direction
-	npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
+		-- Recompute path if target moved significantly or path not active
+		local recomputeThreshold = 10
+		local shouldRecompute = npcData.Pathfinding.Idle
+		if npcData.LastCombatTargetPos then
+			local targetMoved = (npcData.LastCombatTargetPos - targetPos).Magnitude
+			shouldRecompute = shouldRecompute or targetMoved > recomputeThreshold
+		end
 
-	local newPosition = currentPos + movement
-	newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
+		if shouldRecompute then
+			-- Prevent multiple Run() calls by rate limiting
+			local now = tick()
+			local lastRunTime = npcData._lastCombatPathRunTime or 0
+			local timeSinceLastRun = now - lastRunTime
 
-	npcData.Position = newPosition
-	npcData.MovementState = "CombatMoving"
+			if timeSinceLastRun > 0.1 then
+				ClientPathfinding.RunPath(npcData, npcData.VisualModel, combatPosition)
+				npcData.LastCombatTargetPos = targetPos
+				npcData._lastCombatPathRunTime = now
+			end
+		end
+
+		-- Get current waypoint from NoobPath
+		local waypoint = npcData.Pathfinding:GetWaypoint()
+		if waypoint then
+			local waypointPos = waypoint.Position
+
+			-- Calculate distance ignoring Y axis (only XZ plane)
+			-- Same reasoning as SimulateMovement() - see detailed comment there
+			local waypointPosFlat = Vector3.new(waypointPos.X, currentPos.Y, waypointPos.Z)
+			local distanceToWaypoint = (currentPos - waypointPosFlat).Magnitude
+
+			-- If close enough to current waypoint, advance to next
+			if distanceToWaypoint < 2 then
+				local advanced = npcData.Pathfinding:AdvanceWaypoint()
+				if not advanced then
+					-- This was the final waypoint - check if we're close enough to stop
+					-- For combat, use the desired distance check instead
+					if distance <= desiredDistance then
+						npcData.MovementState = "Combat"
+						ClientPathfinding.StopPath(npcData)
+						return
+					end
+					-- Otherwise, keep moving toward the final waypoint
+				else
+					waypoint = npcData.Pathfinding:GetWaypoint()
+					if waypoint then
+						waypointPos = waypoint.Position
+					end
+				end
+			end
+
+			-- Move toward current waypoint
+			local waypointDirection = waypointPos - currentPos
+			waypointDirection = Vector3.new(waypointDirection.X, 0, waypointDirection.Z)
+
+			if waypointDirection.Magnitude > 0.1 then
+				waypointDirection = waypointDirection.Unit
+				local walkSpeed = npcData.Config.WalkSpeed or 16
+				local movement = waypointDirection * walkSpeed * deltaTime
+
+				-- Face target while moving (not waypoint)
+				if direction.Magnitude > 0.1 then
+					npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction.Unit)
+				end
+
+				-- Apply movement
+				local newPosition = currentPos + movement
+				newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
+
+				npcData.Position = newPosition
+			end
+
+			-- Check if waypoint requires jump
+			if waypoint.Action == Enum.PathWaypointAction.Jump and not npcData.IsJumping then
+				ClientNPCSimulator.TriggerJump(npcData)
+			end
+		end
+
+		npcData.MovementState = "CombatMoving"
+	else
+		-- Fallback: direct movement (no collision avoidance)
+		direction = direction.Unit
+		local walkSpeed = npcData.Config.WalkSpeed or 16
+		local movement = direction * walkSpeed * deltaTime
+
+		-- Update orientation FIRST (before movement) to face movement direction
+		npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
+
+		local newPosition = currentPos + movement
+		newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
+
+		npcData.Position = newPosition
+		npcData.MovementState = "CombatMoving"
+	end
 end
 
 --[[
-	Simulate idle wandering behavior
+	Simulate idle wandering behavior with pathfinding
 ]]
 function ClientNPCSimulator.SimulateIdleWander(npcData, deltaTime)
+	-- IMPORTANT: Don't pick new destination if already moving to one
+	-- This prevents path restarting mid-route (causes "blinking")
+	if npcData.Destination then
+		return
+	end
+
 	local now = tick()
 
 	-- Check cooldown
@@ -271,8 +535,14 @@ function ClientNPCSimulator.SimulateIdleWander(npcData, deltaTime)
 	-- Ground check for destination (use NPC's height offset)
 	destination = ClientNPCSimulator.SnapToGroundForNPC(npcData, destination)
 
+	-- Set destination (will trigger pathfinding in SimulateMovement)
 	npcData.Destination = destination
 	npcData.LastWanderTime = now
+
+	-- Start pathfinding immediately if available
+	if ClientPathfinding and npcData.VisualModel then
+		ClientPathfinding.RunPath(npcData, npcData.VisualModel, destination)
+	end
 end
 
 --[[
@@ -316,6 +586,12 @@ end
 	Check if NPC is stuck and handle unstuck behavior
 ]]
 function ClientNPCSimulator.CheckStuck(npcData, deltaTime)
+	-- Don't check for stuck while jumping - NPCs don't move horizontally much during jumps
+	if npcData.IsJumping then
+		npcData.StuckTime = 0
+		return
+	end
+
 	local movement = (npcData.Position - npcData.LastPosition).Magnitude
 
 	if movement < STUCK_THRESHOLD and npcData.MovementState ~= "Idle" then
@@ -335,14 +611,15 @@ end
 	Try to unstuck an NPC
 ]]
 function ClientNPCSimulator.TryUnstuck(npcData)
-	-- Try jumping
+	-- Try jumping to get unstuck
 	if not npcData.IsJumping then
 		npcData.IsJumping = true
 		npcData.JumpVelocity = npcData.Config.JumpPower or 50
 	end
 
-	-- Clear destination to pick a new one
-	npcData.Destination = nil
+	-- Note: We don't clear destination anymore - the stuck detection is already
+	-- disabled while jumping (CheckStuck returns early), so this shouldn't fire
+	-- while jumping. If NPC is truly stuck on ground, the jump should unstuck it.
 end
 
 --[[

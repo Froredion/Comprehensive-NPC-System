@@ -286,9 +286,20 @@ local function detectEnemies(npcData)
 		npcData.CurrentTarget = detectedTargets[1].Model
 		npcData.TargetInSight = true
 		npcData.LastSeenTarget = tick()
+
+		-- Clear idle wander destination to immediately switch to combat movement
+		npcData.Destination = nil
 	else
+		-- Target lost - investigate last known position if we had one
+		local hadTarget = npcData.CurrentTarget ~= nil
 		npcData.CurrentTarget = nil
 		npcData.TargetInSight = false
+
+		-- If we just lost a target and have a last known position, investigate it
+		if hadTarget and npcData.LastKnownTargetPos then
+			npcData.Destination = npcData.LastKnownTargetPos
+			npcData.LastKnownTargetPos = nil
+		end
 	end
 
 	-- 5. Update visualization

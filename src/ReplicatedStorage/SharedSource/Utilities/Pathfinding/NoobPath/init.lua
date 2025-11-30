@@ -118,17 +118,50 @@ function module.new(Character: Model, AgentParams: Path.AgentParams, Move: (Vect
 	return self
 end
 
--- Constructor With Default Humanoid Signals
-function module.Humanoid(Character : Model, AgentParams : Path.AgentParams, Precise : boolean?)
+--[[
+	Constructor With Default Humanoid Signals
+
+	@param Character Model - The character model with Humanoid
+	@param AgentParams Path.AgentParams - Pathfinding parameters
+	@param Precise boolean? - Precise jump handling (default: false)
+	@param ManualMovement boolean? - Enable manual movement mode (default: false)
+
+	MANUAL MOVEMENT MODE:
+	---------------------
+	When ManualMovement = true, NoobPath only COMPUTES paths but does NOT move the character.
+	This is useful for custom physics systems where you want pathfinding logic but manual position control.
+
+	NORMAL MODE (ManualMovement = false):
+	- NoobPath automatically calls Humanoid:MoveTo() for each waypoint
+	- Character moves via Roblox's built-in Humanoid physics
+	- Used for server-side NPCs with physical models
+
+	MANUAL MODE (ManualMovement = true):
+	- NoobPath computes path waypoints but doesn't call MoveTo()
+	- Caller must manually update position by reading GetWaypoint() each frame
+	- Caller must manually call AdvanceWaypoint() when reaching waypoints
+	- Used for client-side NPCs with custom physics (UseAnimationController)
+
+	BACKWARDS COMPATIBILITY:
+	------------------------
+	Omitting ManualMovement parameter defaults to false (normal mode).
+	Existing code using NoobPath continues to work without changes.
+]]
+function module.Humanoid(Character : Model, AgentParams : Path.AgentParams, Precise : boolean?, ManualMovement : boolean?)
 	local Humanoid : Humanoid = Character:FindFirstChildOfClass("Humanoid")
 	local Move = function(WaypointPosition) Humanoid:MoveTo(WaypointPosition) end
-	
+
 	local JumpFinished = GS.new()
 	local MoveFinished = Humanoid.MoveToFinished
-	
+
 	local self = module.new(Character, AgentParams, Move, nil, JumpFinished, MoveFinished)
-	
-	local Jump = function() 
+
+	-- Enable manual movement mode if requested
+	if ManualMovement then
+		self.ManualMovement = true
+	end
+
+	local Jump = function()
 		if Humanoid.FloorMaterial ~= AIR then
 			Humanoid:ChangeState(JUMPING)
 			return
@@ -379,6 +412,26 @@ function NoobPath:GetEstimateTime()
 	return self.Estimate[self.Index]
 end
 
+--[[
+	Manual movement helper: Advance to next waypoint
+	Call this after manually moving to current waypoint in ManualMovement mode
+	@return boolean - True if advanced, false if at destination
+]]
+function NoobPath:AdvanceWaypoint()
+	if self.ManualMovement and not self.Idle then
+		local NextWaypoint = self:GetNextWaypoint()
+		if NextWaypoint then
+			self:TravelNextWaypoint()
+			self.WaypointReached:Fire(self:GetWaypoint(), NextWaypoint)
+			return true
+		else
+			self:Arrive()
+			return false
+		end
+	end
+	return false
+end
+
 function NoobPath:CheckTimeout()
 	local Time = self:GetEstimateTime()
 	if not Time then
@@ -405,14 +458,37 @@ function NoobPath:TravelWaypoint()
 	if self.Idle or not Waypoint then
 		return
 	end
-	self.Move(Waypoint.Position)
-	if self.Timeout then
-		self:CheckTimeout()
+
+	--[[
+		MANUAL MOVEMENT MODE CHECK
+
+		In normal mode (self.ManualMovement = false/nil):
+		- NoobPath automatically moves the character via Humanoid:MoveTo()
+		- Handles jumps via Humanoid:ChangeState(Jumping)
+		- Checks timeout to detect stuck NPCs
+
+		In manual mode (self.ManualMovement = true):
+		- NoobPath does NOTHING automatically
+		- Caller must read waypoints via GetWaypoint() each frame
+		- Caller must manually update position toward waypoint
+		- Caller must check waypoint.Action for jumps
+		- Caller must call AdvanceWaypoint() when reaching waypoints
+
+		This allows custom physics systems (like UseAnimationController)
+		to use pathfinding without Humanoid physics interference.
+	]]
+	if not self.ManualMovement then
+		-- Normal mode: Automatic movement via Humanoid
+		self.Move(Waypoint.Position)
+		if self.Timeout then
+			self:CheckTimeout()
+		end
+		if Waypoint.Action == JUMP then
+			self.InAir = true
+			self.Jump()
+		end
 	end
-	if Waypoint.Action == JUMP then
-		self.InAir = true
-		self.Jump()
-	end
+	-- Manual mode: Caller handles movement (do nothing here)
 end
 
 function NoobPath:Arrive(Route, Partial)

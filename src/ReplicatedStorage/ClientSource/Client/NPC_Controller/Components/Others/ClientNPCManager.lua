@@ -29,6 +29,7 @@ local SimulatedNPCs = {} -- [npcID] = npcData (NPCs this client is simulating)
 local LastSyncTimes = {} -- [npcID] = lastSyncTick
 local LocalPlayer = Players.LocalPlayer
 
+
 ---- Constants
 local CLAIM_DELAY_BASE = 0.1 -- Base delay before claiming (seconds)
 local CLAIM_DELAY_PER_STUD = 0.001 -- Additional delay per stud of distance
@@ -66,9 +67,57 @@ function ClientNPCManager.Initialize()
 		ClientNPCManager.OnNPCRemoved(npcFolder.Name)
 	end)
 
-	-- Start simulation loop
-	RunService.Heartbeat:Connect(function(deltaTime)
+	--[[
+		SIMULATION LOOP ARCHITECTURE
+
+		We use a dual-loop system: RenderStepped (primary) + Heartbeat (fallback)
+
+		WHY TWO LOOPS?
+		---------------
+		RenderStepped:
+		- Runs immediately before each frame is rendered
+		- Tied to client FPS (60 FPS = 60 updates/sec, 144 FPS = 144 updates/sec)
+		- Provides the SMOOTHEST movement possible
+		- PAUSES when player alt-tabs (window loses focus)
+
+		Heartbeat:
+		- Runs at fixed ~60Hz regardless of FPS
+		- CONTINUES running even when alt-tabbed
+		- Ensures NPCs don't freeze when player isn't focused on window
+		- Only activates when RenderStepped hasn't run for >100ms
+
+		EDGE CASE HANDLING:
+		-------------------
+		1. Normal gameplay: RenderStepped handles everything (smooth)
+		2. Player alt-tabs: RenderStepped pauses → Heartbeat takes over
+		3. Player returns: RenderStepped resumes → Heartbeat stops interfering
+
+		IMPORTANT: Do not remove either loop!
+		- Removing RenderStepped = choppy movement during gameplay
+		- Removing Heartbeat = NPCs freeze when alt-tabbed
+		- Removing the 100ms check = double updates (both loops run simultaneously)
+	]]
+	local lastSimTime = tick()
+	local renderSteppedRan = false
+
+	-- PRIMARY LOOP: RenderStepped (smooth movement, synced with FPS)
+	RunService.RenderStepped:Connect(function(deltaTime)
+		renderSteppedRan = true
+		lastSimTime = tick()
 		ClientNPCManager.SimulationStep(deltaTime)
+	end)
+
+	-- FALLBACK LOOP: Heartbeat (keeps NPCs moving when alt-tabbed)
+	RunService.Heartbeat:Connect(function(deltaTime)
+		-- Only run if RenderStepped hasn't run recently (player likely alt-tabbed)
+		local timeSinceLastSim = tick() - lastSimTime
+
+		-- 100ms threshold = RenderStepped paused (window unfocused)
+		if timeSinceLastSim > 0.1 then
+			renderSteppedRan = false
+			ClientNPCManager.SimulationStep(deltaTime)
+		end
+		-- If RenderStepped is active, do nothing (prevent double updates)
 	end)
 
 	-- Start distance check loop
@@ -218,6 +267,7 @@ function ClientNPCManager.StartSimulation(npcFolder)
 		-- Target state
 		CurrentTarget = nil,
 		TargetInSight = false,
+		LastKnownTargetPos = nil,
 
 		-- Jump state
 		IsJumping = false,
@@ -284,7 +334,23 @@ function ClientNPCManager.StopSimulation(npcID)
 end
 
 --[[
-	Main simulation step - called every Heartbeat
+	Main simulation step - called every RenderStepped (primary) or Heartbeat (fallback)
+
+	SINGLE-WRITER PATTERN:
+	-----------------------
+	This is the ONLY place that updates position for NPCs we're simulating.
+	npcData.Position is the authoritative source of truth.
+
+	WRITE ORDER:
+	1. ClientNPCSimulator updates npcData.Position (in-memory)
+	2. We write npcData.Position to positionValue.Value (ReplicatedStorage)
+	3. ClientPhysicsRenderer reads positionValue.Value and syncs visual model
+
+	RACE CONDITION PROTECTION:
+	---------------------------
+	Network updates from other clients are BLOCKED by ListenForPositionUpdates()
+	check: `if not SimulatedNPCs[npcID]`. This ensures we never overwrite our
+	local simulation with stale network data.
 ]]
 function ClientNPCManager.SimulationStep(deltaTime)
 	for npcID, npcData in pairs(SimulatedNPCs) do
@@ -301,18 +367,19 @@ function ClientNPCManager.SimulationStep(deltaTime)
 			continue
 		end
 
-		-- Run simulation step
+		-- Run simulation step (updates npcData.Position in-memory)
 		if ClientNPCSimulator then
 			ClientNPCSimulator.SimulateNPC(npcData, deltaTime)
 		end
 
-		-- Update position in folder for renderer to read
+		-- Write simulated position to ReplicatedStorage (SINGLE WRITER)
+		-- This is the ONLY place that writes position for simulated NPCs
 		local positionValue = npcData.Folder:FindFirstChild("Position")
 		if positionValue then
 			positionValue.Value = npcData.Position
 		end
 
-		-- Update orientation in folder for renderer to read (every frame for smooth turning)
+		-- Write simulated orientation to ReplicatedStorage
 		local orientationValue = npcData.Folder:FindFirstChild("Orientation")
 		if orientationValue and npcData.Orientation then
 			orientationValue.Value = npcData.Orientation
@@ -388,13 +455,27 @@ end
 
 --[[
 	Listen for position updates from other clients
+
+	RACE CONDITION PREVENTION:
+	--------------------------
+	This function MUST only update NPCs that we are NOT simulating.
+	If we update an NPC we're simulating, it causes position "blinking":
+
+	Frame 1: Our simulation updates npcData.Position to (10, 3, 10)
+	Frame 2: Network update arrives with old position (5, 3, 5)
+	Frame 3: Visual model "blinks" backward to old position
+
+	The check `if not SimulatedNPCs[npcID]` prevents this race condition.
 ]]
 function ClientNPCManager.ListenForPositionUpdates()
 	NPC_Service.NPCPositionUpdated:Connect(function(npcID, newPosition, newOrientation)
-		-- Only update if we're NOT simulating this NPC ourselves
+		-- CRITICAL: Only update if we're NOT simulating this NPC ourselves
+		-- This prevents race conditions where network updates overwrite local simulation
 		if not SimulatedNPCs[npcID] then
 			ClientNPCManager.UpdateRemoteNPCPosition(npcID, newPosition, newOrientation)
 		end
+		-- If we ARE simulating this NPC, ignore network updates completely
+		-- Our local simulation is the source of truth
 	end)
 end
 
@@ -402,6 +483,12 @@ end
 	Update position of NPC simulated by another client
 ]]
 function ClientNPCManager.UpdateRemoteNPCPosition(npcID, newPosition, newOrientation)
+	-- Warn if trying to update simulated NPC (should never happen)
+	if SimulatedNPCs[npcID] then
+		warn("[ClientNPCManager] RACE CONDITION! UpdateRemoteNPCPosition called for simulated NPC:", npcID)
+		return
+	end
+
 	local activeNPCsFolder = ReplicatedStorage:FindFirstChild("ActiveNPCs")
 	if not activeNPCsFolder then
 		return
