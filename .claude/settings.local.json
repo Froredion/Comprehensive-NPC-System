@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "mcp__zilliz-code-context__search_code"
+      "mcp__zilliz-code-context__search_code",
+      "Bash(cat:*)",
+      "Bash(xxd:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

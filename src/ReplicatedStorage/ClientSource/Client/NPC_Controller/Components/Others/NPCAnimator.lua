@@ -122,14 +122,47 @@ function NPCAnimator.Setup(npc, visualModel, options)
 	-- Debug: track frames for debug output
 	local debugFrameCounter = 0
 	local DEBUG_INTERVAL = 60 -- Print debug every N frames
+	local isTracked = options._NPCADBG_IsTracked or false
+
+	if isTracked then print("[NPCADBG] NPCAnimator.Setup: npcData exists:", npcDataRef.value ~= nil) end
 
 	-- Setup main animation loop
 	local updateThread = animator.Trove:Add(task.defer(function()
+		local loopStarted = false
+		local npcDataRetryTimer = 0
+		local NPCDATA_RETRY_INTERVAL = 0.5 -- Retry fetching npcData every 0.5s if nil
+
 		while npc.Parent and targetModel.Parent do
 			local deltaTime = task.wait()
 
+			if not loopStarted then
+				loopStarted = true
+				if isTracked then print("[NPCADBG] Animation loop STARTED, npcData:", npcDataRef.value ~= nil and "YES" or "NIL") end
+			end
+
 			local currentState
 			local currentNPCData = npcDataRef.value
+
+			-- If npcData is nil, periodically try to fetch it
+			if not currentNPCData then
+				npcDataRetryTimer = npcDataRetryTimer + deltaTime
+				if npcDataRetryTimer >= NPCDATA_RETRY_INTERVAL then
+					npcDataRetryTimer = 0
+					-- Try to get npcData from ClientNPCManager
+					local ClientNPCManagerModule = script.Parent:FindFirstChild("ClientNPCManager")
+					if ClientNPCManagerModule then
+						local manager = require(ClientNPCManagerModule)
+						-- Extract npcID from visual model name (format: "npcID_Visual")
+						local npcID = npc.Name:gsub("_Visual$", "")
+						local fetchedData = manager.GetSimulatedNPC(npcID)
+						if fetchedData then
+							npcDataRef.value = fetchedData
+							currentNPCData = fetchedData
+							if isTracked then print("[NPCADBG] Retry SUCCESS - got npcData!") end
+						end
+					end
+				end
+			end
 
 			-- Determine animation state
 			if currentNPCData then
@@ -142,29 +175,45 @@ function NPCAnimator.Setup(npc, visualModel, options)
 					currentState = "Running" -- BetterAnimate handles idle/walk/run based on speed
 				end
 
-				-- Debug output
-				if NPCAnimator.DebugMode then
+				-- Debug output (only for tracked NPC)
+				if isTracked then
 					debugFrameCounter = debugFrameCounter + 1
 					if debugFrameCounter >= DEBUG_INTERVAL then
 						debugFrameCounter = 0
 						local velocity = animator._CalculatedVelocity or Vector3.zero
-						local moveDir = animator._MoveDirection or Vector3.zero
 						local speed = animator._Speed or 0
+						local currentClass = animator._Class and animator._Class.Current or "?"
 						print(string.format(
-							"[NPCAnimator Debug] %s: Pos=%s, Vel=%.1f, MoveDir=%.2f, Speed=%.1f, State=%s, MovementState=%s",
-							npc.Name,
-							tostring(currentNPCData.Position),
+							"[NPCADBG] npcData=YES, Vel=%.1f, Speed=%.1f, State=%s, Class=%s",
 							velocity.Magnitude,
-							moveDir.Magnitude,
 							speed,
 							currentState,
-							currentNPCData.MovementState or "nil"
+							currentClass
 						))
 					end
 				end
 			else
-				-- Traditional mode: use Humanoid state
-				currentState = nextState or humanoid:GetState().Name
+				-- No npcData yet - use "Running" state (NOT humanoid state!)
+				-- This avoids PlatformStanding which stops all animations
+				-- BetterAnimate will determine Idle/Walk/Run from velocity
+				currentState = nextState or "Running"
+
+				-- Debug output for nil npcData case (only for tracked NPC)
+				if isTracked then
+					debugFrameCounter = debugFrameCounter + 1
+					if debugFrameCounter >= DEBUG_INTERVAL then
+						debugFrameCounter = 0
+						local velocity = animator._CalculatedVelocity or Vector3.zero
+						local speed = animator._Speed or 0
+						local currentClass = animator._Class and animator._Class.Current or "?"
+						print(string.format(
+							"[NPCADBG] npcData=NIL, using Running fallback, Vel=%.1f, Speed=%.1f, Class=%s",
+							velocity.Magnitude,
+							speed,
+							currentClass
+						))
+					end
+				end
 			end
 
 			-- Step animator
@@ -184,6 +233,7 @@ function NPCAnimator.Setup(npc, visualModel, options)
 		targetModel = targetModel,
 		trove = animator.Trove,
 		npcDataRef = npcDataRef,
+		_NPCADBG_IsTracked = isTracked, -- For debug tracking
 	}
 
 	local modeStr = npcData and "UseAnimationController" or "Traditional"
@@ -201,12 +251,20 @@ end
 ]]
 function NPCAnimator.LinkNPCData(npc, npcData)
 	local instance = AnimatorInstances[npc]
+	local isTracked = instance and instance._NPCADBG_IsTracked
+	if isTracked then print("[NPCADBG] LinkNPCData: instance exists:", instance ~= nil) end
 	if instance then
 		-- Update the npcData reference - PositionProvider/OrientationProvider will use it automatically
 		instance.npcDataRef.value = npcData
-
-		if NPCAnimator.DebugMode then
-			print("[NPCAnimator] Linked npcData to:", npc.Name)
+		if isTracked then print("[NPCADBG] LinkNPCData SUCCESS") end
+	else
+		-- Check if this NPC is tracked even without instance
+		local ClientNPCManager = script.Parent:FindFirstChild("ClientNPCManager")
+		if ClientNPCManager then
+			local manager = require(ClientNPCManager)
+			if manager.NPCADBG_TrackedNPC and npc.Name:find(manager.NPCADBG_TrackedNPC) then
+				print("[NPCADBG] LinkNPCData FAILED - no animator instance yet!")
+			end
 		end
 	end
 end

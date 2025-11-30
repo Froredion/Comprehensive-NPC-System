@@ -1000,6 +1000,15 @@ do
 					local StateFunction = self._State.Functions[StateNew]
 					if StateFunction then
 						StateFunction(self, StateNew)
+					else
+						-- [NPCADBG] Debug: only warn once per unique state
+						if self._NPCADBG_WarnedStates == nil then
+							self._NPCADBG_WarnedStates = {}
+						end
+						if not self._NPCADBG_WarnedStates[StateNew] then
+							self._NPCADBG_WarnedStates[StateNew] = true
+							print('[NPCADBG] BetterAnimate: No state function for:', StateNew)
+						end
 					end
 				end
 

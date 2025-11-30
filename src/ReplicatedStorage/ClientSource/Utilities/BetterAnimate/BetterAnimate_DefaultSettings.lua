@@ -59,6 +59,11 @@ local Module = {
 			end,	
 
 			[Enum.HumanoidStateType.PlatformStanding.Name] = function(self: Types.BetterAnimate)
+				-- [NPCADBG] This stops animations when PlatformStand=true (only print once)
+				if not self._NPCADBG_PlatformWarned then
+					self._NPCADBG_PlatformWarned = true
+					print('[NPCADBG] PlatformStanding triggered - STOPPING animations!')
+				end
 				self:StopClassAnimation()
 			end,
 
