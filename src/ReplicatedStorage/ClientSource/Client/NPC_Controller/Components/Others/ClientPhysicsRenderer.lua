@@ -325,17 +325,22 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 					   - NPCs simulated by other clients use network-replicated values
 				]]
 				local targetPosition = positionValue.Value
+				local targetRotation = orientationValue and orientationValue.Value.Rotation or CFrame.identity
+
 				local ClientNPCManagerModule = script.Parent:FindFirstChild("ClientNPCManager")
 				if ClientNPCManagerModule then
 					local manager = require(ClientNPCManagerModule)
 					local npcData = manager.GetSimulatedNPC(npcID)
 					if npcData then
-						-- Use direct position from simulation (no delay)
+						-- Use direct values from simulation (no delay)
+						-- This avoids 1-frame delay from Value replication
 						targetPosition = npcData.Position
+						if npcData.Orientation then
+							targetRotation = npcData.Orientation.Rotation
+						end
 					end
 				end
 
-				local targetRotation = orientationValue and orientationValue.Value.Rotation or CFrame.identity
 				hrp.CFrame = CFrame.new(targetPosition) * targetRotation
 			end
 		end)
