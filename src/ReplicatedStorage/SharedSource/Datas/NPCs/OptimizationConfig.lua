@@ -45,7 +45,7 @@ local OptimizationConfig = {
 		- NPCs tied to game progression
 		- Any NPC that affects gameplay outcomes
 	]]
-	UseClientPhysics = true, -- DISABLED by default
+	UseClientPhysics = false, -- DISABLED by default
 
 	-- Client-side simulation settings (only if UseClientPhysics = true)
 	ClientSimulation = {

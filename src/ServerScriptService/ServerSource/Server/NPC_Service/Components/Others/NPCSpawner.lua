@@ -63,6 +63,12 @@ local function findGroundPosition(position, spawnerPart)
 			break -- No hit, use fallback
 		end
 
+		-- Print if detected part is descendant of workspace.Spawners
+		local spawnersFolder = workspace:FindFirstChild("Spawners")
+		if spawnersFolder and rayResult.Instance:IsDescendantOf(spawnersFolder) then
+			print("[Ground Detection] Detected ground on Spawner:", rayResult.Instance:GetFullName())
+		end
+
 		if rayResult.Instance.CanCollide then
 			return rayResult.Position
 		end

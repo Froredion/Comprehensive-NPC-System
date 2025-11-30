@@ -154,8 +154,21 @@ function ClientNPCSimulator.SimulateNPC(npcData, deltaTime)
 		return
 	end
 
-	-- Skip all movement if CanWalk is false
+	-- Handle stationary NPCs (CanWalk = false) - only apply gravity
 	if npcData.Config.CanWalk == false then
+		-- Stationary NPCs still need gravity to prevent floating
+		if not npcData.IsJumping then
+			local groundPos = ClientNPCSimulator.GetGroundPosition(npcData.Position)
+			if groundPos then
+				local heightOffset = npcData.HeightOffset or calculateHeightOffset(npcData)
+				local expectedY = groundPos.Y + heightOffset
+
+				-- If we're above ground, snap down immediately
+				if npcData.Position.Y > expectedY then
+					npcData.Position = Vector3.new(npcData.Position.X, expectedY, npcData.Position.Z)
+				end
+			end
+		end
 		return
 	end
 
@@ -187,6 +200,19 @@ function ClientNPCSimulator.SimulateNPC(npcData, deltaTime)
 		-- Reset position to pre-movement, then apply jump physics with horizontal offset
 		npcData.Position = preMovementPosition
 		ClientNPCSimulator.SimulateJumpWithHorizontal(npcData, deltaTime, horizontalMovement)
+	else
+		-- When not jumping, ensure NPC is on ground (apply gravity/snap to ground)
+		-- This prevents NPCs from floating when idle
+		local groundPos = ClientNPCSimulator.GetGroundPosition(npcData.Position)
+		if groundPos then
+			local heightOffset = npcData.HeightOffset or calculateHeightOffset(npcData)
+			local expectedY = groundPos.Y + heightOffset
+
+			-- If we're above ground, snap down immediately
+			if npcData.Position.Y > expectedY then
+				npcData.Position = Vector3.new(npcData.Position.X, expectedY, npcData.Position.Z)
+			end
+		end
 	end
 
 	-- Check for stuck condition

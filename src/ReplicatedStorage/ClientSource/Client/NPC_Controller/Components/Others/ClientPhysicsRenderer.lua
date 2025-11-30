@@ -88,6 +88,12 @@ function ClientPhysicsRenderer.SnapToGround(position, heightOffset)
 			break -- No hit
 		end
 
+		-- Print if detected part is descendant of workspace.Spawners
+		local spawnersFolder = workspace:FindFirstChild("Spawners")
+		if spawnersFolder and rayResult.Instance:IsDescendantOf(spawnersFolder) then
+			print("[Client Ground Detection] Detected ground on Spawner:", rayResult.Instance:GetFullName())
+		end
+
 		if rayResult.Instance.CanCollide then
 			-- Found ground - position at ground + height offset
 			return Vector3.new(position.X, rayResult.Position.Y + heightOffset, position.Z)
