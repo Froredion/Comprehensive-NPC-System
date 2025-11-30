@@ -56,24 +56,46 @@ local function hasLineOfSight(self, targetPosition, targetModel)
 end
 
 --[[
-	Check if target is an ally (same faction)
-	
+	Check if target is an ally (same faction or both have no faction)
+
 	@param self table - NPC data
 	@param targetNPCData table - Target NPC data
 	@return boolean - True if target is an ally
 ]]
 local function isAlly(self, targetNPCData)
-	-- Check faction in CustomData
-	if
-		self.CustomData
-		and self.CustomData.Faction
-		and targetNPCData.CustomData
-		and targetNPCData.CustomData.Faction
-	then
-		return self.CustomData.Faction == targetNPCData.CustomData.Faction
+	local selfFaction = self.CustomData and self.CustomData.Faction
+	local targetFaction = targetNPCData.CustomData and targetNPCData.CustomData.Faction
+
+	-- If both have factions, compare them
+	if selfFaction and targetFaction then
+		return selfFaction == targetFaction
 	end
 
+	-- If neither has a faction, treat as allies (NPCs without factions don't attack each other)
+	if not selfFaction and not targetFaction then
+		return true
+	end
+
+	-- One has faction, one doesn't - not allies
 	return false
+end
+
+--[[
+	Check if NPC can attack the target (respects CanAttackAllies setting)
+
+	@param self table - NPC data
+	@param targetNPCData table - Target NPC data
+	@return boolean - True if can attack
+]]
+local function canAttackTarget(self, targetNPCData)
+	-- Check if they're allies
+	if isAlly(self, targetNPCData) then
+		-- Only attack allies if CanAttackAllies is true
+		return self.CanAttackAllies == true
+	end
+
+	-- Not allies, can attack
+	return true
 end
 
 --[[
@@ -129,8 +151,8 @@ local function detectEnemies(self)
 			if npc ~= self.Model and npc.PrimaryPart and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
 				local targetNPCData = NPC_Service.ActiveNPCs[npc]
 
-				-- Skip if ally
-				if targetNPCData and isAlly(self, targetNPCData) then
+				-- Skip if we can't attack this target
+				if targetNPCData and not canAttackTarget(self, targetNPCData) then
 					continue
 				end
 
@@ -221,8 +243,6 @@ function SightDetector:SetupSightDetector(self)
 	-- Start detection thread
 	local detectionThread = task.spawn(sightDetectionThread, self)
 	table.insert(self.TaskThreads, detectionThread)
-
-	print("[SightDetector] Setup sight detector for:", self.Model.Name, "Mode:", self.SightMode)
 end
 
 --[[

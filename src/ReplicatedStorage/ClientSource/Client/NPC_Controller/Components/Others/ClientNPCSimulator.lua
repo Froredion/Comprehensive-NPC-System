@@ -105,6 +105,11 @@ function ClientNPCSimulator.SimulateNPC(npcData, deltaTime)
 		return
 	end
 
+	-- Skip all movement if CanWalk is false
+	if npcData.Config.CanWalk == false then
+		return
+	end
+
 	-- Handle jumping first
 	if npcData.IsJumping then
 		ClientNPCSimulator.SimulateJump(npcData, deltaTime)

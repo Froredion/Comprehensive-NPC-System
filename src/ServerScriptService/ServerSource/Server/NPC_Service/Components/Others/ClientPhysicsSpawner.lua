@@ -129,6 +129,7 @@ local function createNPCDataFolder(npcID, config, position)
 		JumpPower = config.JumpPower or 50,
 		SightRange = config.SightRange or 200,
 		SightMode = config.SightMode or "Directional",
+		CanWalk = config.CanWalk ~= false, -- Default true
 		MovementMode = config.MovementMode or "Ranged",
 		MeleeOffsetRange = config.MeleeOffsetRange or 5,
 		EnableIdleWander = config.EnableIdleWander ~= false,

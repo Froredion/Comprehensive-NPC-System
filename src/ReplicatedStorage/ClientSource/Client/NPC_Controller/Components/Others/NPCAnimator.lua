@@ -1,27 +1,22 @@
 --[[
 	NPCAnimator - BetterAnimate integration for NPC animations
-
-	Purpose: Handles client-side NPC animations using BetterAnimate library
-	Works independently of NPCRenderer - animates server NPCs or visual models
+	Handles client-side NPC animations using BetterAnimate library
 
 	Features:
 	- Full BetterAnimate integration with proper timing
-	- MoveDirection calculation for directional animations
 	- Event system (MarkerReached, NewState, etc.)
-	- Proper cleanup using Trove
-	- Debug mode support
 	- Inverse kinematics support
 	- UseAnimationController optimization support (client-side physics NPCs)
+	- Proper cleanup using Trove
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local BetterAnimate = require(ReplicatedStorage.ClientSource.Utilities.BetterAnimate)
 
 local NPCAnimator = {}
-NPCAnimator.DebugMode = true -- Set to true to enable debug visualization
+NPCAnimator.DebugMode = false
 
--- Track BetterAnimate instances for each NPC
-local AnimatorInstances = {} -- [npcModel] = {animator, updateThread, targetModel, trove, npcData?}
+local AnimatorInstances = {} -- [npcModel] = {animator, updateThread, targetModel, trove, npcDataRef}
 
 --[[
 	Setup BetterAnimate for an NPC with full feature support
@@ -57,19 +52,16 @@ function NPCAnimator.Setup(npc, visualModel, options)
 		return
 	end
 
-	-- Parse options
 	options = options or {}
 	local enableDebug = options.debug or NPCAnimator.DebugMode
-	local enableIK = options.inverseKinematics ~= false -- Default true
-	local npcData = options.npcData -- For UseAnimationController NPCs
+	local enableIK = options.inverseKinematics ~= false
+	local npcData = options.npcData
 
-	-- Get rig type
-	local rigType = humanoid.RigType.Name -- "R6" or "R15"
+	local rigType = humanoid.RigType.Name
 
 	-- Create BetterAnimate instance
 	local animator = BetterAnimate.New(targetModel)
 
-	-- Configure BetterAnimate
 	local classesPreset = BetterAnimate.GetClassesPreset(rigType)
 	if classesPreset then
 		animator:SetClassesPreset(classesPreset)
@@ -77,38 +69,26 @@ function NPCAnimator.Setup(npc, visualModel, options)
 
 	animator:SetInverseEnabled(enableIK)
 	animator:SetDebugEnabled(enableDebug)
-
-	-- Configure FastConfig
 	animator.FastConfig.R6ClimbFix = true
 
-	-- Store physical properties for FixCenterOfMass
 	local physicalProperties = primaryPart.CurrentPhysicalProperties
 
-	-- Setup event listeners
 	NPCAnimator.SetupEvents(animator, npc, targetModel)
 
-	-- Track next state (for Jumping event handling)
 	local nextState = nil
 
-	-- Setup Jumping event handler (since we're not using Humanoid.StateChanged)
 	animator.Trove:Add(humanoid.Jumping:Connect(function()
 		nextState = "Jumping"
 	end))
 
-	-- Setup Died event for cleanup
 	animator.Trove:Add(humanoid.Died:Once(function()
 		NPCAnimator.Cleanup(npc)
 	end))
 
-	-- Setup tool animation support
 	NPCAnimator.SetupToolSupport(animator, targetModel, primaryPart, physicalProperties)
 
-	-- Store reference to npcData for dynamic access (allows late binding via LinkNPCData)
 	local npcDataRef = { value = npcData }
 
-	-- Always enable position-based velocity for NPC visual models
-	-- This is needed because UseAnimationController NPCs have no physics (AssemblyLinearVelocity = 0)
-	-- When npcData is available, use simulation data; otherwise fall back to visual model position
 	animator.FastConfig.UsePositionBasedVelocity = true
 	animator.FastConfig.PositionProvider = function()
 		local data = npcDataRef.value
@@ -118,13 +98,6 @@ function NPCAnimator.Setup(npc, visualModel, options)
 		local data = npcDataRef.value
 		return data and data.Orientation or primaryPart.CFrame
 	end
-
-	-- Debug: track frames for debug output
-	local debugFrameCounter = 0
-	local DEBUG_INTERVAL = 60 -- Print debug every N frames
-	local isTracked = options._NPCADBG_IsTracked or false
-
-	if isTracked then print("[NPCADBG] NPCAnimator.Setup: npcData exists:", npcDataRef.value ~= nil) end
 
 	-- Setup main animation loop
 	local updateThread = animator.Trove:Add(task.defer(function()

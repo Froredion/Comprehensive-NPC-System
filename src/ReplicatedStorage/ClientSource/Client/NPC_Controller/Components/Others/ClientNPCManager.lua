@@ -21,6 +21,7 @@ local ClientNPCManager = {}
 local NPC_Service
 local ClientNPCSimulator
 local ClientPhysicsRenderer
+local ClientSightDetector
 local OptimizationConfig
 
 ---- State
@@ -82,26 +83,13 @@ function ClientNPCManager.Initialize()
 	-- Listen for orphaned NPCs
 	ClientNPCManager.ListenForOrphanedNPCs()
 
-	print("[ClientNPCManager] Initialized - watching for UseAnimationController NPCs")
 end
 
 --[[
 	Handle when a new NPC is added to ReplicatedStorage.ActiveNPCs
 ]]
--- [NPCADBG] Debug: only trace first NPC
-local NPCADBG_TrackedNPC = nil
-ClientNPCManager.NPCADBG_TrackedNPC = nil -- Exposed for other modules
-
 function ClientNPCManager.OnNPCAdded(npcFolder)
 	local npcID = npcFolder.Name
-
-	-- Track first NPC only
-	local isTracked = (NPCADBG_TrackedNPC == nil)
-	if isTracked then
-		NPCADBG_TrackedNPC = npcID
-		ClientNPCManager.NPCADBG_TrackedNPC = npcID -- Expose for other modules
-		print("[NPCADBG] === TRACKING NPC:", npcID, "===")
-	end
 
 	-- Wait a moment for all values to replicate
 	task.wait(0.1)
@@ -109,15 +97,12 @@ function ClientNPCManager.OnNPCAdded(npcFolder)
 	-- Notify renderer FIRST so visual model exists before simulation starts
 	-- This ensures height offset can be calculated from actual model
 	if ClientPhysicsRenderer then
-		if isTracked then print("[NPCADBG] Calling ClientPhysicsRenderer.OnNPCAdded") end
 		ClientPhysicsRenderer.OnNPCAdded(npcID)
 	end
 
 	-- Check if we should simulate this NPC (after renderer has created visual model)
 	local shouldSimulate = ClientNPCManager.ShouldSimulateNPC(npcFolder)
-	if isTracked then print("[NPCADBG] ShouldSimulateNPC:", shouldSimulate) end
 	if shouldSimulate then
-		if isTracked then print("[NPCADBG] Calling StartSimulation") end
 		ClientNPCManager.StartSimulation(npcFolder)
 	end
 end
@@ -245,18 +230,19 @@ function ClientNPCManager.StartSimulation(npcFolder)
 	SimulatedNPCs[npcID] = npcData
 	LastSyncTimes[npcID] = tick()
 
-	local isTracked = (NPCADBG_TrackedNPC == npcID)
-	if isTracked then print("[NPCADBG] Added npcData to SimulatedNPCs") end
-
 	-- Initialize simulation logic
 	if ClientNPCSimulator then
 		ClientNPCSimulator.InitializeNPC(npcData)
 	end
 
+	-- Setup sight detection
+	if ClientSightDetector then
+		ClientSightDetector.SetupSightDetector(npcData)
+	end
+
 	-- Link npcData to animator if visual model already exists (for UseAnimationController support)
 	if ClientPhysicsRenderer then
 		local visualModel = ClientPhysicsRenderer.GetVisualModel(npcID)
-		if isTracked then print("[NPCADBG] visualModel exists:", visualModel ~= nil) end
 		if visualModel then
 			npcData.VisualModel = visualModel
 
@@ -264,15 +250,10 @@ function ClientNPCManager.StartSimulation(npcFolder)
 			local NPCAnimator = script.Parent:FindFirstChild("NPCAnimator")
 			if NPCAnimator then
 				local animator = require(NPCAnimator)
-				if isTracked then print("[NPCADBG] Calling LinkNPCData from StartSimulation") end
 				animator.LinkNPCData(visualModel, npcData)
 			end
-		else
-			if isTracked then print("[NPCADBG] No visual model yet - LinkNPCData skipped here") end
 		end
 	end
-
-	print("[ClientNPCManager] Started simulating NPC:", npcID)
 end
 
 --[[
@@ -282,6 +263,11 @@ function ClientNPCManager.StopSimulation(npcID)
 	local npcData = SimulatedNPCs[npcID]
 	if not npcData then
 		return
+	end
+
+	-- Cleanup sight detection
+	if ClientSightDetector then
+		ClientSightDetector.CleanupSightDetector(npcData)
 	end
 
 	-- Cleanup simulation
@@ -295,8 +281,6 @@ function ClientNPCManager.StopSimulation(npcID)
 	-- Remove from tracking
 	SimulatedNPCs[npcID] = nil
 	LastSyncTimes[npcID] = nil
-
-	print("[ClientNPCManager] Stopped simulating NPC:", npcID)
 end
 
 --[[
@@ -577,6 +561,11 @@ function ClientNPCManager.Init()
 		local rendererModule = componentsFolder:FindFirstChild("ClientPhysicsRenderer")
 		if rendererModule then
 			ClientPhysicsRenderer = require(rendererModule)
+		end
+
+		local sightDetectorModule = componentsFolder:FindFirstChild("ClientSightDetector")
+		if sightDetectorModule then
+			ClientSightDetector = require(sightDetectorModule)
 		end
 	end)
 end
