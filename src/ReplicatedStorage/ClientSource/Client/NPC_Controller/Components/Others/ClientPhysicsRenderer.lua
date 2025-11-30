@@ -24,6 +24,9 @@ local ClientPhysicsRenderer = {}
 local RenderConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.RenderConfig)
 local NPCAnimator -- Loaded in Init
 
+---- Collision Configuration
+local collisionGroupName = "NPCs" -- Default fallback
+
 ---- State
 local RenderedNPCs = {} -- [npcID] = { visualModel, connections, ... }
 local LocalPlayer = Players.LocalPlayer
@@ -226,14 +229,27 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 		rootPart.Anchored = true
 	end
 
-	-- Make all parts non-collidable (client-side visuals only)
+	-- Make all parts non-collidable (client-side visuals only) and apply collision group
 	for _, descendant in pairs(visualModel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.CanCollide = false
 			descendant.CanTouch = false
 			descendant.CanQuery = false
+			
+			-- Apply collision group for NPCs
+			descendant.CollisionGroup = collisionGroupName
 		end
 	end
+	
+	-- Monitor for new parts (accessories, tools, etc.) and apply collision group
+	visualModel.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("BasePart") then
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+			descendant.CollisionGroup = collisionGroupName
+		end
+	end)
 
 	-- Apply scale if specified (check both CustomData and ClientRenderData)
 	local scale = (config.CustomData and config.CustomData.Scale)
@@ -587,6 +603,18 @@ function ClientPhysicsRenderer.RefreshAll()
 end
 
 function ClientPhysicsRenderer.Start()
+	-- Try to load CollisionConfig for collision group names
+	local collisionConfigModule = ReplicatedStorage.SharedSource.Datas:WaitForChild("CollisionConfig", 2)
+	if collisionConfigModule then
+		local config = require(collisionConfigModule)
+		if config.Groups and config.Groups.NPCs then
+			collisionGroupName = config.Groups.NPCs
+			print("[ClientPhysicsRenderer] Using collision group name from CollisionConfig:", collisionGroupName)
+		end
+	else
+		print("[ClientPhysicsRenderer] CollisionConfig not found, using default collision group:", collisionGroupName)
+	end
+	
 	-- Initialize the renderer
 	ClientPhysicsRenderer.Initialize()
 end

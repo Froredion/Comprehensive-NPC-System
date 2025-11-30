@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local HttpService = game:GetService("HttpService")
 local Knit = require(ReplicatedStorage.Packages.Knit)
 
@@ -6,6 +7,11 @@ local NPCSpawner = {}
 
 ---- Knit Services
 local NPC_Service
+local CollisionService
+
+---- Collision Configuration
+local CollisionConfig
+local collisionGroupName = "NPCs" -- Default fallback
 
 ---- Client Configuration
 local RenderConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.RenderConfig)
@@ -409,6 +415,26 @@ function NPCSpawner:SpawnNPC(config)
 	-- Set network ownership to server (must be done after parenting to workspace)
 	npcModel.PrimaryPart:SetNetworkOwner(nil)
 
+	-- Apply collision group for NPCs
+	if CollisionService then
+		-- Use CollisionService if available (preferred method)
+		CollisionService:ApplyCollisionToCharacter(npcModel, collisionGroupName)
+	else
+		-- Fallback: Apply collision group directly
+		for _, descendant in ipairs(npcModel:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				descendant.CollisionGroup = collisionGroupName
+			end
+		end
+		
+		-- Monitor for new parts (accessories, tools, etc.)
+		npcModel.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("BasePart") then
+				descendant.CollisionGroup = collisionGroupName
+			end
+		end)
+	end
+
 	-- Initialize behaviors (Movement and Sight)
 	task.defer(function()
 		-- Only setup movement if CanWalk is enabled
@@ -430,6 +456,44 @@ end
 
 function NPCSpawner.Init()
 	NPC_Service = Knit.GetService("NPC_Service")
+	
+	-- Try to load CollisionConfig for collision group names
+	local collisionConfigModule = ReplicatedStorage.SharedSource.Datas:WaitForChild("CollisionConfig", 2)
+	if collisionConfigModule then
+		CollisionConfig = require(collisionConfigModule)
+		if CollisionConfig.Groups and CollisionConfig.Groups.NPCs then
+			collisionGroupName = CollisionConfig.Groups.NPCs
+			print("[NPCSpawner] Using collision group name from CollisionConfig:", collisionGroupName)
+		end
+	end
+	
+	-- Check if CollisionService exists
+	local serverSource = ServerScriptService:FindFirstChild("ServerSource")
+	if serverSource then
+		local server = serverSource:FindFirstChild("Server")
+		if server then
+			for _, descendant in ipairs(server:GetDescendants()) do
+				if descendant.Name == "CollisionService" and descendant:IsA("ModuleScript") then
+					-- CollisionService exists, try to get it
+					local getSuccess, service = pcall(function()
+						return Knit.GetService("CollisionService")
+					end)
+					
+					if getSuccess and service then
+						CollisionService = service
+						print("[NPCSpawner] CollisionService found and will be used for collision management")
+					else
+						warn("[NPCSpawner] CollisionService exists but couldn't be loaded:", service)
+					end
+					break
+				end
+			end
+		end
+	end
+	
+	if not CollisionService then
+		print("[NPCSpawner] CollisionService not found - using fallback collision group assignment")
+	end
 end
 
 return NPCSpawner
