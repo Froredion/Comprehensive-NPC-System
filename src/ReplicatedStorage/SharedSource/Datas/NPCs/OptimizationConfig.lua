@@ -45,7 +45,7 @@ local OptimizationConfig = {
 		- NPCs tied to game progression
 		- Any NPC that affects gameplay outcomes
 	]]
-	UseAnimationController = true, -- DISABLED by default
+	UseAnimationController = false, -- DISABLED by default
 
 	-- Client-side simulation settings (only if UseAnimationController = true)
 	ClientSimulation = {
@@ -55,8 +55,20 @@ local OptimizationConfig = {
 		-- Maximum NPCs one client can simulate
 		MAX_SIMULATED_PER_CLIENT = 50,
 
-		-- How often client syncs position to server (seconds)
-		POSITION_SYNC_INTERVAL = 0.5,
+		--[[
+			How often client syncs position to server (seconds)
+
+			TOWER DEFENSE OPTIMIZATION:
+			- Lower value (e.g., 0.1) = More frequent updates, smoother NPC movement, but higher server load
+			- Higher value (e.g., 0.5) = Less frequent updates, lower server load, but NPCs appear to "stop" briefly
+
+			Recommended values:
+			- For smooth Tower Defense: 0.1 seconds (10 updates/sec)
+			- For low server load and for any other games: 0.5 seconds (2 updates/sec) - current setting
+
+			Trade-off: More frequent updates = smoother gameplay but higher network/server usage
+		]]
+		POSITION_SYNC_INTERVAL = 0.1,
 
 		-- Distance threshold for server to broadcast position updates (studs)
 		-- Server only sends position updates to clients within this range

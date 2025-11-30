@@ -100,7 +100,8 @@ end
 --[[
 	Create or update sphere to visualize sight range
 	Only recreates when radius changes
-	
+	Uses double-sided Ball mesh for visibility from inside
+
 	@param npcModel Model - NPC model
 	@param radius number - Sight range radius
 ]]
@@ -119,16 +120,26 @@ local function createSightRangeSphere(npcModel, radius)
 		cache.sphere = nil
 	end
 
-	-- Create sphere
-	local sphere = Instance.new("Part")
+	-- Get ball template (double-sided mesh, visible from inside)
+	local ballTemplate = ReplicatedStorage:FindFirstChild("Assets")
+		and ReplicatedStorage.Assets:FindFirstChild("NPCs")
+		and ReplicatedStorage.Assets.NPCs:FindFirstChild("Visualizers")
+		and ReplicatedStorage.Assets.NPCs.Visualizers:FindFirstChild("Ball")
+
+	if not ballTemplate then
+		warn("[SightVisualizer] Ball mesh not found at ReplicatedStorage.Assets.NPCs.Visualizers.Ball")
+		return
+	end
+
+	-- Clone the ball mesh
+	local sphere = ballTemplate:Clone()
 	sphere.Name = "SightRangeSphere"
-	sphere.Shape = Enum.PartType.Ball
 	sphere.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
 	sphere.Position = npcModel.PrimaryPart.Position
 	sphere.Anchored = false
 	sphere.CanCollide = false
 	sphere.CanQuery = false
-	sphere.Transparency = 0.85
+	sphere.Transparency = 0.9 -- Higher transparency for double-sided mesh
 	sphere.Color = COLOR_SIGHT_RANGE
 	sphere.Material = Enum.Material.Neon
 	sphere.Massless = true

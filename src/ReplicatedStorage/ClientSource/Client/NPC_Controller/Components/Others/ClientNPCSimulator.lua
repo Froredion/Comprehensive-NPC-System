@@ -121,8 +121,14 @@ function ClientNPCSimulator.InitializeNPC(npcData)
 		end
 	end
 
-	-- Setup pathfinding if available
-	if ClientPathfinding and npcData.VisualModel then
+	-- Setup pathfinding if available AND enabled in config
+	-- Respect UsePathfinding config: if false, use simple direct movement instead
+	local usePathfinding = npcData.Config.UsePathfinding
+	if usePathfinding == nil then
+		usePathfinding = true -- Default to true if not specified
+	end
+
+	if usePathfinding and ClientPathfinding and npcData.VisualModel then
 		npcData.Pathfinding = ClientPathfinding.CreatePath(npcData, npcData.VisualModel)
 	end
 end
@@ -322,6 +328,7 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 		npcData.MovementState = "Moving"
 	else
 		-- Fallback: direct movement (no collision avoidance)
+		-- This is used when UsePathfinding = false (e.g., Tower Defense waypoint following)
 		local currentPos = npcData.Position
 		local targetPos = npcData.Destination
 
@@ -331,8 +338,17 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 
 		local distance = direction.Magnitude
 
+		-- Debug print (throttled to avoid spam)
+		npcData._lastDirectMovePrint = npcData._lastDirectMovePrint or 0
+		if tick() - npcData._lastDirectMovePrint > 2 then
+			print(string.format("[TD_CLIENT] NPC %s: Direct movement - Distance: %.2f studs, Destination: %s", npcData.ID, distance, tostring(targetPos)))
+			npcData._lastDirectMovePrint = tick()
+		end
+
 		-- Check if we've reached destination
-		if distance < 2 then
+		-- Use extremely small threshold (0.01 studs) to reach exact position
+		if distance < 0.01 then
+			print(string.format("[TD_CLIENT] NPC %s: ✅ Reached destination! Clearing...", npcData.ID))
 			npcData.Destination = nil
 			npcData.MovementState = "Idle"
 			return
@@ -342,6 +358,11 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 		direction = direction.Unit
 		local walkSpeed = npcData.Config.WalkSpeed or 16
 		local movement = direction * walkSpeed * deltaTime
+
+		-- Clamp movement to not overshoot the destination
+		if movement.Magnitude > distance then
+			movement = direction * distance
+		end
 
 		-- Update orientation FIRST (before movement) to face movement direction
 		npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)

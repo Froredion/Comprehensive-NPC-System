@@ -437,6 +437,33 @@ function ClientPhysicsSpawner:SetTarget(npcID, target)
 	end
 end
 
+--[[
+	Set destination for a client-physics NPC
+
+	@param npcID string - The NPC ID
+	@param destination Vector3? - Destination to set (nil to clear)
+]]
+function ClientPhysicsSpawner:SetDestination(npcID, destination)
+	local npcData = self:GetNPCData(npcID)
+	if not npcData then
+		return
+	end
+
+	npcData.Destination = destination
+
+	local npcFolder = ActiveNPCsFolder:FindFirstChild(npcID)
+	if npcFolder then
+		-- Create or update Destination value
+		local destValue = npcFolder:FindFirstChild("Destination")
+		if not destValue then
+			destValue = Instance.new("Vector3Value")
+			destValue.Name = "Destination"
+			destValue.Parent = npcFolder
+		end
+		destValue.Value = destination or Vector3.zero
+	end
+end
+
 function ClientPhysicsSpawner.Start()
 	-- Component start logic
 end

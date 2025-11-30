@@ -7,9 +7,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Knit = require(ReplicatedStorage.Packages.Knit)
 Knit.OnStart():await()
 
-if true then
-	return
-end
+-- if true then
+-- 	return
+-- end
 
 local NPC_Service = Knit.GetService("NPC_Service")
 
@@ -147,19 +147,39 @@ local function spawnWaveEnemy()
 	return enemy, enemyId
 end
 
--- Function to move enemy through waypoints
+-- Function to move enemy through waypoints (supports both traditional and client-physics NPCs)
 local function moveEnemyThroughWaypoints(enemy, enemyId)
-	local humanoid = enemy:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		warn("❌ Enemy has no Humanoid!")
-		return
-	end
+	local isClientPhysicsNPC = typeof(enemy) == "string"
 
 	local currentWaypointIndex = 1
 
+	-- Helper to check if NPC is still valid
+	local function isNPCValid()
+		if isClientPhysicsNPC then
+			local npcData = NPC_Service:GetClientPhysicsNPCData(enemy)
+			return npcData ~= nil and npcData.IsAlive
+		else
+			return enemy and enemy.Parent
+		end
+	end
+
+	-- Helper to get NPC position
+	local function getNPCPosition()
+		if isClientPhysicsNPC then
+			local npcData = NPC_Service:GetClientPhysicsNPCData(enemy)
+			if npcData and npcData.Position then
+				return npcData.Position
+			end
+			return nil
+		else
+			local rootPart = enemy:FindFirstChild("HumanoidRootPart")
+			return rootPart and rootPart.Position
+		end
+	end
+
 	-- Start moving through waypoints
 	local function moveToNextWaypoint()
-		if not enemy or not enemy.Parent then
+		if not isNPCValid() then
 			activeEnemies[enemyId] = nil
 			return
 		end
@@ -175,46 +195,100 @@ local function moveEnemyThroughWaypoints(enemy, enemyId)
 		local waypoint = walkpoints[currentWaypointIndex]
 		local waypointPos = waypoint.Position
 
-		-- Set destination using NPC_Service
+		-- Set destination using NPC_Service (works for both NPC types)
 		NPC_Service:SetDestination(enemy, waypointPos)
 
-		-- Wait for enemy to reach waypoint
-		local connection
-		connection = humanoid.MoveToFinished:Connect(function(reached)
-			if connection then
-				connection:Disconnect()
+		if isClientPhysicsNPC then
+			-- For client-physics NPCs: poll position to check if reached waypoint
+			local REACH_DISTANCE = 5 -- studs (reduced from 5 to match client's 0.5 stud threshold better)
+			local MAX_TIME = 30 -- seconds timeout
+			local OptimizationConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.OptimizationConfig)
+			local POLL_INTERVAL = OptimizationConfig.ClientSimulation.POSITION_SYNC_INTERVAL -- Match client sync rate for responsiveness
+			local startTime = tick()
+
+			task.spawn(function()
+				while isNPCValid() and currentWaypointIndex <= #walkpoints do
+					local npcPos = getNPCPosition()
+					if npcPos then
+						local distance = (Vector3.new(npcPos.X, 0, npcPos.Z) - Vector3.new(waypointPos.X, 0, waypointPos.Z)).Magnitude
+
+						if distance < REACH_DISTANCE then
+							-- Reached waypoint
+							print(string.format("[TD] Enemy %s reached waypoint %d", tostring(enemy), currentWaypointIndex))
+							currentWaypointIndex = currentWaypointIndex + 1
+							task.wait() -- Small pause between waypoints
+							moveToNextWaypoint()
+							return
+						end
+					end
+
+					-- Timeout check
+					if tick() - startTime > MAX_TIME then
+						print(string.format("[TD] Enemy %s timeout at waypoint %d", tostring(enemy), currentWaypointIndex))
+						currentWaypointIndex = currentWaypointIndex + 1
+						moveToNextWaypoint()
+						return
+					end
+
+					task.wait(POLL_INTERVAL) -- Poll at same rate as client position sync for maximum responsiveness
+				end
+			end)
+		else
+			-- For traditional NPCs: use MoveToFinished event
+			local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+			if not humanoid then
+				warn("❌ Enemy has no Humanoid!")
+				return
 			end
 
-			if reached then
-				currentWaypointIndex = currentWaypointIndex + 1
-				task.wait() -- Small pause between waypoints
-				moveToNextWaypoint()
-			else
-				task.wait(1)
-				moveToNextWaypoint()
-			end
-		end)
+			local connection
+			connection = humanoid.MoveToFinished:Connect(function(reached)
+				if connection then
+					connection:Disconnect()
+				end
 
-		-- Timeout fallback (if enemy gets stuck)
-		task.delay(30, function()
-			if connection then
-				connection:Disconnect()
-			end
-			if enemy and enemy.Parent and currentWaypointIndex <= #walkpoints then
-				currentWaypointIndex = currentWaypointIndex + 1
-				moveToNextWaypoint()
-			end
-		end)
+				if reached then
+					currentWaypointIndex = currentWaypointIndex + 1
+					task.wait() -- Small pause between waypoints
+					moveToNextWaypoint()
+				else
+					task.wait(1)
+					moveToNextWaypoint()
+				end
+			end)
+
+			-- Timeout fallback (if enemy gets stuck)
+			task.delay(30, function()
+				if connection then
+					connection:Disconnect()
+				end
+				if enemy and enemy.Parent and currentWaypointIndex <= #walkpoints then
+					currentWaypointIndex = currentWaypointIndex + 1
+					moveToNextWaypoint()
+				end
+			end)
+		end
 	end
 
 	moveToNextWaypoint()
 end
 
--- Function to count active enemies
+-- Function to count active enemies (supports both traditional and client-physics NPCs)
 local function countActiveEnemies()
 	local count = 0
 	for enemyId, enemy in pairs(activeEnemies) do
-		if enemy and enemy.Parent then
+		local isValid = false
+
+		if typeof(enemy) == "string" then
+			-- Client-physics NPC: check if data still exists
+			local npcData = NPC_Service:GetClientPhysicsNPCData(enemy)
+			isValid = npcData ~= nil and npcData.IsAlive
+		else
+			-- Traditional NPC: check if model still exists
+			isValid = enemy and enemy.Parent
+		end
+
+		if isValid then
 			count = count + 1
 		else
 			-- Clean up dead references

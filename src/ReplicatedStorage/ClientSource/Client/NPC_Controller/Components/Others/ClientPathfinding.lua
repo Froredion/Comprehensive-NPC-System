@@ -195,6 +195,16 @@ end
 	@param destination Vector3 - Target destination
 ]]
 function ClientPathfinding.RunPath(npcData, visualModel, destination)
+	-- Respect UsePathfinding config: if false, don't use pathfinding
+	local usePathfinding = npcData.Config.UsePathfinding
+	if usePathfinding == nil then
+		usePathfinding = true -- Default to true if not specified
+	end
+
+	if not usePathfinding then
+		return -- Let SimulateMovement use fallback direct movement
+	end
+
 	-- Convert destination to ground-level coordinates (NoobPath expects Y ≈ 0)
 	-- Pathfinding works on ground plane, not character height
 	local groundDestination = Vector3.new(destination.X, 0, destination.Z)

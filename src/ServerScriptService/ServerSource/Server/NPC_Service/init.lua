@@ -106,22 +106,38 @@ end
 
 --[[
 	Manually set target for NPC
-	
-	@param npcModel Model - The NPC model
+
+	@param npcModelOrID Model|string - The NPC model (traditional) or NPC ID (UseAnimationController)
 	@param target Model? - Target to set (nil to clear)
 ]]
-function NPC_Service:SetTarget(npcModel, target)
-	NPC_Service.SetComponent:SetTarget(npcModel, target)
+function NPC_Service:SetTarget(npcModelOrID, target)
+	if typeof(npcModelOrID) == "string" then
+		-- Client-physics NPC (UseAnimationController)
+		if NPC_Service.Components.ClientPhysicsSpawner then
+			NPC_Service.Components.ClientPhysicsSpawner:SetTarget(npcModelOrID, target)
+		end
+	else
+		-- Traditional server-physics NPC
+		NPC_Service.SetComponent:SetTarget(npcModelOrID, target)
+	end
 end
 
 --[[
 	Manually set destination for NPC
-	
-	@param npcModel Model - The NPC model
+
+	@param npcModelOrID Model|string - The NPC model (traditional) or NPC ID (UseAnimationController)
 	@param destination Vector3? - Destination to set (nil to clear)
 ]]
-function NPC_Service:SetDestination(npcModel, destination)
-	NPC_Service.SetComponent:SetDestination(npcModel, destination)
+function NPC_Service:SetDestination(npcModelOrID, destination)
+	if typeof(npcModelOrID) == "string" then
+		-- Client-physics NPC (UseAnimationController)
+		if NPC_Service.Components.ClientPhysicsSpawner then
+			NPC_Service.Components.ClientPhysicsSpawner:SetDestination(npcModelOrID, destination)
+		end
+	else
+		-- Traditional server-physics NPC
+		NPC_Service.SetComponent:SetDestination(npcModelOrID, destination)
+	end
 end
 
 --[[

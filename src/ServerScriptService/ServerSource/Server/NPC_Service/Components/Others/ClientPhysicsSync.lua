@@ -89,6 +89,12 @@ function ClientPhysicsSync.HandlePositionUpdate(fromPlayer, npcID, newPosition, 
 		newPosition = ClientPhysicsSync.SoftBoundsCheck(npcID, newPosition)
 	end
 
+	-- Debug: print position update receipt
+	if not npcFolder:GetAttribute("_lastServerUpdatePrint") or tick() - npcFolder:GetAttribute("_lastServerUpdatePrint") > 3 then
+		print(string.format("[TD_SERVER_RECV] NPC %s: Received position from %s: %s", npcID, fromPlayer.Name, tostring(newPosition)))
+		npcFolder:SetAttribute("_lastServerUpdatePrint", tick())
+	end
+
 	-- Update position in ReplicatedStorage
 	local positionValue = npcFolder:FindFirstChild("Position")
 	if positionValue then
@@ -106,6 +112,18 @@ function ClientPhysicsSync.HandlePositionUpdate(fromPlayer, npcID, newPosition, 
 	-- Track position and update time
 	NPCPositions[npcID] = newPosition
 	LastUpdateTimes[npcID] = tick()
+
+	-- CRITICAL FIX: Update NPC data in service registry
+	-- The server-side Tower Defense test reads from this data!
+	if NPC_Service and NPC_Service.ActiveClientPhysicsNPCs then
+		local npcData = NPC_Service.ActiveClientPhysicsNPCs[npcID]
+		if npcData then
+			npcData.Position = newPosition
+			if newOrientation then
+				npcData.Orientation = newOrientation
+			end
+		end
+	end
 
 	-- Broadcast to nearby clients ONLY
 	ClientPhysicsSync.BroadcastToNearbyClients(npcID, newPosition, newOrientation, fromPlayer)

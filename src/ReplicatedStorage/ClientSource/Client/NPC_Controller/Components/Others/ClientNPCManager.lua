@@ -252,6 +252,10 @@ function ClientNPCManager.StartSimulation(npcFolder)
 	local orientationValue = npcFolder:FindFirstChild("Orientation")
 	local orientation = orientationValue and orientationValue.Value or CFrame.new()
 
+	-- Get initial destination if set by server
+	local destinationValue = npcFolder:FindFirstChild("Destination")
+	local initialDestination = destinationValue and destinationValue.Value ~= Vector3.zero and destinationValue.Value or nil
+
 	-- Create simulation data
 	local npcData = {
 		ID = npcID,
@@ -263,7 +267,7 @@ function ClientNPCManager.StartSimulation(npcFolder)
 		IsAlive = true,
 
 		-- Movement state
-		Destination = nil,
+		Destination = initialDestination,
 		Pathfinding = nil,
 		MovementState = "Idle",
 
@@ -278,10 +282,58 @@ function ClientNPCManager.StartSimulation(npcFolder)
 
 		-- Visual model reference (set by renderer)
 		VisualModel = nil,
+
+		-- Connections for cleanup
+		Connections = {},
 	}
 
 	SimulatedNPCs[npcID] = npcData
 	LastSyncTimes[npcID] = tick()
+
+	-- Watch for server-set destination changes
+	if destinationValue then
+		local destConnection = destinationValue.Changed:Connect(function(newDest)
+			-- Only update if NPC is still being simulated by us
+			if SimulatedNPCs[npcID] and npcData.IsAlive then
+				-- Vector3.zero means clear destination
+				if newDest == Vector3.zero then
+					print(string.format("[TD_CLIENT_MGR] NPC %s: Destination cleared by server", npcID))
+					npcData.Destination = nil
+				else
+					print(string.format("[TD_CLIENT_MGR] NPC %s: New destination from server: %s", npcID, tostring(newDest)))
+					npcData.Destination = newDest
+				end
+			end
+		end)
+		table.insert(npcData.Connections, destConnection)
+	end
+
+	-- Watch for dynamically created Destination value (if server creates it after spawn)
+	local childAddedConnection = npcFolder.ChildAdded:Connect(function(child)
+		if child.Name == "Destination" and child:IsA("Vector3Value") then
+			print(string.format("[TD_CLIENT_MGR] NPC %s: Destination value added dynamically", npcID))
+
+			local destConnection = child.Changed:Connect(function(newDest)
+				if SimulatedNPCs[npcID] and npcData.IsAlive then
+					if newDest == Vector3.zero then
+						print(string.format("[TD_CLIENT_MGR] NPC %s: Destination cleared by server", npcID))
+						npcData.Destination = nil
+					else
+						print(string.format("[TD_CLIENT_MGR] NPC %s: New destination from server: %s", npcID, tostring(newDest)))
+						npcData.Destination = newDest
+					end
+				end
+			end)
+			table.insert(npcData.Connections, destConnection)
+
+			-- Apply initial value if set
+			if child.Value ~= Vector3.zero then
+				print(string.format("[TD_CLIENT_MGR] NPC %s: Initial destination from dynamically added value: %s", npcID, tostring(child.Value)))
+				npcData.Destination = child.Value
+			end
+		end
+	end)
+	table.insert(npcData.Connections, childAddedConnection)
 
 	-- Initialize simulation logic
 	if ClientNPCSimulator then
@@ -316,6 +368,18 @@ function ClientNPCManager.StopSimulation(npcID)
 	local npcData = SimulatedNPCs[npcID]
 	if not npcData then
 		return
+	end
+
+	-- Cleanup connections (Destination watcher, etc.)
+	if npcData.Connections then
+		for _, connection in pairs(npcData.Connections) do
+			if typeof(connection) == "RBXScriptConnection" then
+				pcall(function()
+					connection:Disconnect()
+				end)
+			end
+		end
+		npcData.Connections = {}
 	end
 
 	-- Cleanup sight detection
@@ -448,6 +512,12 @@ function ClientNPCManager.PositionSyncLoop()
 
 		for npcID, npcData in pairs(SimulatedNPCs) do
 			if npcData.IsAlive and npcData.Position then
+				-- Debug: print position sync
+				if not npcData._lastSyncDebugPrint or tick() - npcData._lastSyncDebugPrint > 3 then
+					print(string.format("[TD_CLIENT_SYNC] NPC %s: Sending position to server: %s", npcID, tostring(npcData.Position)))
+					npcData._lastSyncDebugPrint = tick()
+				end
+
 				-- Send position update to server
 				NPC_Service:UpdateNPCPosition(npcID, npcData.Position, npcData.Orientation)
 				LastSyncTimes[npcID] = tick()
