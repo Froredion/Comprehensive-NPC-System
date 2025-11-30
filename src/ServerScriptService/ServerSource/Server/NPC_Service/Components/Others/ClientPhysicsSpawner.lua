@@ -28,20 +28,42 @@ local ActiveNPCsFolder -- Created in Init
 	Find ground position using raycast
 
 	@param position Vector3 - Starting position
+	@param spawnerPart BasePart? - Optional spawner part to exclude from raycast
 	@return Vector3 - Ground position (or original if not found)
 ]]
-local function findGroundPosition(position)
+local function findGroundPosition(position, spawnerPart)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { workspace:FindFirstChild("Characters") or workspace }
+	raycastParams.FilterDescendantsInstances = {
+		workspace:FindFirstChild("Characters") or workspace,
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
+
+	-- Add spawner part to filter if provided
+	if spawnerPart then
+		raycastParams:AddToFilter(spawnerPart)
+	end
 
 	-- Cast from slightly above spawn position downward
 	-- This prevents detecting objects far above (like airplanes/projectiles) as ground
-	local startPos = position + Vector3.new(0, 5, 0)
-	local rayResult = workspace:Raycast(startPos, Vector3.new(0, -50, 0), raycastParams)
+	local currentStart = position + Vector3.new(0, 5, 0)
 
-	if rayResult then
-		return rayResult.Position
+	-- Loop to skip non-collidable parts (max 5 iterations)
+	for _ = 1, 5 do
+		local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -50, 0), raycastParams)
+
+		if not rayResult then
+			break -- No hit, use fallback
+		end
+
+		if rayResult.Instance.CanCollide then
+			return rayResult.Position
+		end
+
+		-- Skip this part and continue from just below it
+		raycastParams:AddToFilter(rayResult.Instance)
+		currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
 	end
 
 	return position
@@ -278,8 +300,8 @@ function ClientPhysicsSpawner:SpawnNPC(config)
 	-- Generate unique ID
 	local npcID = HttpService:GenerateGUID(false)
 
-	-- Find ground position
-	local groundPos = findGroundPosition(spawnPosition)
+	-- Find ground position (pass spawner part to exclude from raycast)
+	local groundPos = findGroundPosition(spawnPosition, config.SpawnerPart)
 
 	-- Calculate proper height offset from model
 	local heightOffset = getHeightOffsetFromModel(config.ModelPath)

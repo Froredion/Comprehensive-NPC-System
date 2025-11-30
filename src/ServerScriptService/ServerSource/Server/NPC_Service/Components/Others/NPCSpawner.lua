@@ -25,23 +25,45 @@ local DISABLED_STATES = {
 
 --[[
 	Find ground position using raycast
-	
+
 	@param position Vector3 - Starting position
+	@param spawnerPart BasePart? - Optional spawner part to exclude from raycast
 	@return Vector3? - Ground position or nil if not found
 ]]
-local function findGroundPosition(position)
+local function findGroundPosition(position, spawnerPart)
 	-- Step 1: Raise position by 2 studs
 	local startPos = position + Vector3.new(0, 2, 0)
 
 	-- Step 2: Raycast downward to find ground
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { workspace:FindFirstChild("Characters") or workspace }
+	raycastParams.FilterDescendantsInstances = {
+		workspace:FindFirstChild("Characters") or workspace,
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 
-	local rayResult = workspace:Raycast(startPos, Vector3.new(0, -1000, 0), raycastParams)
+	-- Add spawner part to filter if provided
+	if spawnerPart then
+		raycastParams:AddToFilter(spawnerPart)
+	end
 
-	if rayResult then
-		return rayResult.Position
+	-- Loop to skip non-collidable parts (max 5 iterations)
+	local currentStart = startPos
+	for _ = 1, 5 do
+		local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -1000, 0), raycastParams)
+
+		if not rayResult then
+			break -- No hit, use fallback
+		end
+
+		if rayResult.Instance.CanCollide then
+			return rayResult.Position
+		end
+
+		-- Skip this part and continue from just below it
+		raycastParams:AddToFilter(rayResult.Instance)
+		currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
 	end
 
 	-- Fallback to original position if no ground found
@@ -119,8 +141,8 @@ local function createMinimalNPC(config)
 		end
 	end)
 
-	-- Find ground position
-	local groundPos = findGroundPosition(config.Position)
+	-- Find ground position (pass spawner part to exclude from raycast)
+	local groundPos = findGroundPosition(config.Position, config.SpawnerPart)
 
 	-- Adjust for HipHeight and HumanoidRootPart size (use scaled values)
 	-- Use the correctly scaled HipHeight that accounts for the original model's scale
@@ -196,8 +218,8 @@ local function createFullNPC(config)
 		end
 	end
 
-	-- Find ground position
-	local groundPos = findGroundPosition(config.Position)
+	-- Find ground position (pass spawner part to exclude from raycast)
+	local groundPos = findGroundPosition(config.Position, config.SpawnerPart)
 
 	-- Adjust for HipHeight and HumanoidRootPart size (scaled)
 	-- After ScaleTo, the HipHeight is already at the correctly scaled value

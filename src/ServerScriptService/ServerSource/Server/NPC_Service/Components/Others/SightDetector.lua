@@ -47,7 +47,13 @@ local function hasLineOfSight(self, targetPosition, targetModel)
 
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { self.Model, targetModel, workspace:FindFirstChild("Characters") }
+	raycastParams.FilterDescendantsInstances = {
+		self.Model,
+		targetModel,
+		workspace:FindFirstChild("Characters"),
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 
 	local rayResult = workspace:Raycast(npcPos, direction * distance, raycastParams)
 

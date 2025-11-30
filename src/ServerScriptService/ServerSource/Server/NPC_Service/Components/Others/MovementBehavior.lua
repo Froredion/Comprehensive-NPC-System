@@ -52,12 +52,28 @@ local function findRandomWalkablePoint(npcData)
 		-- Raycast to find ground
 		local raycastParams = RaycastParams.new()
 		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-		raycastParams.FilterDescendantsInstances = { workspace:FindFirstChild("Characters") or workspace }
+		raycastParams.FilterDescendantsInstances = {
+			workspace:FindFirstChild("Characters") or workspace,
+			workspace:FindFirstChild("VisualWaypoints"),
+			workspace:FindFirstChild("ClientSightVisualization"),
+		}
 
-		local rayResult = workspace:Raycast(targetPos + Vector3.new(0, 10, 0), Vector3.new(0, -100, 0), raycastParams)
+		-- Loop to skip non-collidable parts (max 5 iterations)
+		local currentStart = targetPos + Vector3.new(0, 10, 0)
+		for _ = 1, 5 do
+			local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -100, 0), raycastParams)
 
-		if rayResult then
-			return rayResult.Position
+			if not rayResult then
+				break -- No hit, try next random point
+			end
+
+			if rayResult.Instance.CanCollide then
+				return rayResult.Position
+			end
+
+			-- Skip this part and continue from just below it
+			raycastParams:AddToFilter(rayResult.Instance)
+			currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
 		end
 	end
 
@@ -91,7 +107,13 @@ local function findRushPoint(npcData, distance, minDist, maxDist)
 	-- Validate with raycast (check for obstacles)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { npcData.Model, target, workspace:FindFirstChild("Characters") }
+	raycastParams.FilterDescendantsInstances = {
+		npcData.Model,
+		target,
+		workspace:FindFirstChild("Characters"),
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 
 	local rayResult = workspace:Raycast(npcPos, rushPoint - npcPos, raycastParams)
 
@@ -127,12 +149,29 @@ local function findStrafePoint(npcData, targetPosition)
 	-- Raycast to validate
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { npcData.Model, workspace:FindFirstChild("Characters") }
+	raycastParams.FilterDescendantsInstances = {
+		npcData.Model,
+		workspace:FindFirstChild("Characters"),
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 
-	local rayResult = workspace:Raycast(strafePoint + Vector3.new(0, 10, 0), Vector3.new(0, -100, 0), raycastParams)
+	-- Loop to skip non-collidable parts (max 5 iterations)
+	local currentStart = strafePoint + Vector3.new(0, 10, 0)
+	for _ = 1, 5 do
+		local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -100, 0), raycastParams)
 
-	if rayResult then
-		return rayResult.Position
+		if not rayResult then
+			break -- No hit
+		end
+
+		if rayResult.Instance.CanCollide then
+			return rayResult.Position
+		end
+
+		-- Skip this part and continue from just below it
+		raycastParams:AddToFilter(rayResult.Instance)
+		currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
 	end
 
 	return nil

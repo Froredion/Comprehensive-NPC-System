@@ -62,7 +62,12 @@ local function hasLineOfSight(npcData, targetPosition, targetModel)
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
 	-- Build filter list
-	local filterList = { targetModel, workspace:FindFirstChild("Characters") }
+	local filterList = {
+		targetModel,
+		workspace:FindFirstChild("Characters"),
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 	if npcData.VisualModel then
 		table.insert(filterList, npcData.VisualModel)
 	end

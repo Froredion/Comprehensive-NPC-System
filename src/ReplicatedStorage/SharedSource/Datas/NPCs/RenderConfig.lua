@@ -20,7 +20,7 @@ local RenderConfig = {
 	DISTANCE_CHECK_INTERVAL = 1.0,
 	
 	-- Enable visual debugging (show wireframes, info)
-	DEBUG_MODE = false,
+	DEBUG_MODE = true,
 }
 
 return RenderConfig

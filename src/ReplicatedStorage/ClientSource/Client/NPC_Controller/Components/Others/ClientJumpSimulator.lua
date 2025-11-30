@@ -143,12 +143,31 @@ end
 function ClientJumpSimulator.IsOnGround(position)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { workspace:FindFirstChild("Characters") or workspace }
+	raycastParams.FilterDescendantsInstances = {
+		workspace:FindFirstChild("Characters") or workspace,
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 
-	local startPos = position + Vector3.new(0, 0.5, 0)
-	local rayResult = workspace:Raycast(startPos, Vector3.new(0, -GROUND_CHECK_DISTANCE - 0.5, 0), raycastParams)
+	-- Loop to skip non-collidable parts (max 5 iterations)
+	local currentStart = position + Vector3.new(0, 0.5, 0)
+	for _ = 1, 5 do
+		local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -GROUND_CHECK_DISTANCE - 0.5, 0), raycastParams)
 
-	return rayResult ~= nil
+		if not rayResult then
+			return false -- No hit
+		end
+
+		if rayResult.Instance.CanCollide then
+			return true
+		end
+
+		-- Skip this part and continue from just below it
+		raycastParams:AddToFilter(rayResult.Instance)
+		currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
+	end
+
+	return false
 end
 
 --[[
@@ -160,15 +179,31 @@ end
 function ClientJumpSimulator.GetGroundPosition(position)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { workspace:FindFirstChild("Characters") or workspace }
+	raycastParams.FilterDescendantsInstances = {
+		workspace:FindFirstChild("Characters") or workspace,
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 
 	-- Cast from slightly above current position downward
 	-- This prevents detecting objects far above (like airplanes/projectiles) as ground
-	local startPos = position + Vector3.new(0, 3, 0)
-	local rayResult = workspace:Raycast(startPos, Vector3.new(0, -20, 0), raycastParams)
+	local currentStart = position + Vector3.new(0, 3, 0)
 
-	if rayResult then
-		return rayResult.Position
+	-- Loop to skip non-collidable parts (max 5 iterations)
+	for _ = 1, 5 do
+		local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -20, 0), raycastParams)
+
+		if not rayResult then
+			break -- No hit
+		end
+
+		if rayResult.Instance.CanCollide then
+			return rayResult.Position
+		end
+
+		-- Skip this part and continue from just below it
+		raycastParams:AddToFilter(rayResult.Instance)
+		currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
 	end
 
 	return nil

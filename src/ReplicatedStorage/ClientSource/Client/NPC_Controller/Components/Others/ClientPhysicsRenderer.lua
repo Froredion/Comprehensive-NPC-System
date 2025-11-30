@@ -66,21 +66,33 @@ function ClientPhysicsRenderer.SnapToGround(position, heightOffset)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	-- Exclude Characters folder and any NPCs folder to avoid hitting other NPCs
-	local excludeList = {}
-	local charactersFolder = workspace:FindFirstChild("Characters")
-	if charactersFolder then
-		table.insert(excludeList, charactersFolder)
-	end
+	local excludeList = {
+		workspace:FindFirstChild("Characters"),
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 	raycastParams.FilterDescendantsInstances = excludeList
 
 	-- Cast from above the position to find actual ground
 	-- Start higher to ensure we're above any spawn point objects
-	local startPos = Vector3.new(position.X, position.Y + 20, position.Z)
-	local rayResult = workspace:Raycast(startPos, Vector3.new(0, -100, 0), raycastParams)
+	local currentStart = Vector3.new(position.X, position.Y + 20, position.Z)
 
-	if rayResult then
-		-- Found ground - position at ground + height offset
-		return Vector3.new(position.X, rayResult.Position.Y + heightOffset, position.Z)
+	-- Loop to skip non-collidable parts (max 5 iterations)
+	for _ = 1, 5 do
+		local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -100, 0), raycastParams)
+
+		if not rayResult then
+			break -- No hit
+		end
+
+		if rayResult.Instance.CanCollide then
+			-- Found ground - position at ground + height offset
+			return Vector3.new(position.X, rayResult.Position.Y + heightOffset, position.Z)
+		end
+
+		-- Skip this part and continue from just below it
+		raycastParams:AddToFilter(rayResult.Instance)
+		currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
 	end
 
 	-- No ground found, return original position

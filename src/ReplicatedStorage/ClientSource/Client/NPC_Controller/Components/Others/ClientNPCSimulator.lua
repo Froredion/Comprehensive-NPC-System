@@ -760,13 +760,28 @@ end
 function ClientNPCSimulator.GetGroundPosition(position)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { workspace:FindFirstChild("Characters") or workspace }
+	raycastParams.FilterDescendantsInstances = {
+		workspace:FindFirstChild("Characters") or workspace,
+		workspace:FindFirstChild("VisualWaypoints"),
+		workspace:FindFirstChild("ClientSightVisualization"),
+	}
 
-	local startPos = position
-	local rayResult = workspace:Raycast(startPos + Vector3.new(0,1,0), Vector3.new(0, -100, 0), raycastParams)
+	-- Loop to skip non-collidable parts (max 5 iterations)
+	local currentStart = position + Vector3.new(0, 1, 0)
+	for _ = 1, 5 do
+		local rayResult = workspace:Raycast(currentStart, Vector3.new(0, -100, 0), raycastParams)
 
-	if rayResult then
-		return rayResult.Position
+		if not rayResult then
+			break -- No hit
+		end
+
+		if rayResult.Instance.CanCollide then
+			return rayResult.Position
+		end
+
+		-- Skip this part and continue from just below it
+		raycastParams:AddToFilter(rayResult.Instance)
+		currentStart = rayResult.Position + Vector3.new(0, -0.1, 0)
 	end
 
 	return nil
