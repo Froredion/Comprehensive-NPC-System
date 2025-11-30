@@ -10,7 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Knit = require(ReplicatedStorage.Packages.Knit)
 Knit.OnStart():await()
 
-if false then -- Set to true to disable this tester
+if true then
 	return
 end
 
@@ -83,18 +83,46 @@ local testNPC = NPC_Service:SpawnNPC(spawnConfig)
 
 if testNPC then
 	print("✅ Spawned DEBUG_MeleeNPC successfully")
-	print("📍 Position:", testNPC.PrimaryPart and testNPC.PrimaryPart.Position or "N/A")
+	print("📍 NPC ID:", testNPC)
 
-	-- Set a destination to trigger pathfinding
-	task.wait(2)
-	if testNPC and testNPC.PrimaryPart then
-		local targetPos = testNPC.PrimaryPart.Position + Vector3.new(30, 0, 0)
-		print("🎯 Setting destination to:", targetPos)
-		NPC_Service:SetDestination(testNPC, targetPos)
+	-- Wait for client to claim the NPC
+	task.wait(3)
+
+	-- Get NPC's current position and set a distant destination
+	local npcData = NPC_Service:GetClientPhysicsNPCData(testNPC)
+	local startPos = npcData and npcData.Position or Vector3.new(0, 5, 0)
+	local targetPos = startPos + Vector3.new(100, 0, 0) -- Walk 100 studs in X direction
+
+	print("🎯 Setting destination to:", targetPos)
+	print("📍 NPC should walk AND jump simultaneously\n")
+
+	-- Set destination so NPC is walking
+	-- Note: For client-physics NPCs, destination is set via ActiveNPCs folder
+	local activeNPCsFolder = ReplicatedStorage:FindFirstChild("ActiveNPCs")
+	if activeNPCsFolder then
+		local npcFolder = activeNPCsFolder:FindFirstChild(testNPC)
+		if npcFolder then
+			local destValue = npcFolder:FindFirstChild("Destination")
+			if destValue then
+				destValue.Value = targetPos
+			end
+		end
+	end
+
+	task.wait(1) -- Let NPC start walking
+
+	-- Test jumping continuously while walking
+	print("🦘 Starting continuous jump test - jumping every 1 second")
+	local jumpCount = 0
+	while true do
+		jumpCount = jumpCount + 1
+		print("🦘 Jump #" .. jumpCount)
+		NPC_Service:TriggerJump(testNPC)
+		task.wait(1)
 	end
 else
 	warn("❌ Failed to spawn DEBUG_MeleeNPC")
 end
 
-print("\n💡 Watch for [DEBUG_PATH] prints in client console")
-print("💡 The NPC should move toward the target destination")
+print("\n💡 Watch the NPC in-game - it should jump while continuing to walk")
+print("💡 The NPC should maintain horizontal velocity during jumps")

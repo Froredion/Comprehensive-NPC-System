@@ -10,6 +10,7 @@ local NPC_Service = Knit.CreateService({
 		-- Signals for UseAnimationController client-physics system
 		NPCPositionUpdated = Knit.CreateSignal(), -- Broadcast NPC position updates to nearby clients
 		NPCsOrphaned = Knit.CreateSignal(), -- Broadcast when NPCs need new owners
+		NPCJumpTriggered = Knit.CreateSignal(), -- Broadcast when NPC should jump (for testing/manual control)
 	},
 
 	-- Registry of all active NPCs (traditional server-physics NPCs)
@@ -176,6 +177,23 @@ function NPC_Service:GetClientPhysicsNPCData(npcID)
 		return NPC_Service.Components.ClientPhysicsSpawner:GetNPCData(npcID)
 	end
 	return nil
+end
+
+--[[
+	Trigger a jump for a client-physics NPC (UseAnimationController only)
+	Broadcasts to all clients - the simulating client will execute the jump.
+
+	@param npcID string - The NPC ID
+]]
+function NPC_Service:TriggerJump(npcID)
+	-- Verify NPC exists
+	if not NPC_Service.ActiveClientPhysicsNPCs[npcID] then
+		warn("[NPC_Service] TriggerJump: NPC not found:", npcID)
+		return
+	end
+
+	-- Broadcast to all clients - the one simulating this NPC will handle it
+	NPC_Service.Client.NPCJumpTriggered:FireAll(npcID)
 end
 
 ---- Client Methods for UseAnimationController ----

@@ -132,6 +132,9 @@ function ClientNPCManager.Initialize()
 	-- Listen for orphaned NPCs
 	ClientNPCManager.ListenForOrphanedNPCs()
 
+	-- Listen for jump triggers from server
+	ClientNPCManager.ListenForJumpTriggers()
+
 end
 
 --[[
@@ -557,6 +560,19 @@ function ClientNPCManager.HandleOrphanedNPCs(npcPositions)
 			end
 		end
 	end
+end
+
+--[[
+	Listen for jump triggers from server
+]]
+function ClientNPCManager.ListenForJumpTriggers()
+	NPC_Service.NPCJumpTriggered:Connect(function(npcID)
+		-- Only trigger jump if we're simulating this NPC
+		local npcData = SimulatedNPCs[npcID]
+		if npcData then
+			ClientNPCSimulator.TriggerJump(npcData)
+		end
+	end)
 end
 
 --[[

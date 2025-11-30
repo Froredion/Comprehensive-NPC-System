@@ -153,13 +153,11 @@ function ClientNPCSimulator.SimulateNPC(npcData, deltaTime)
 		return
 	end
 
-	-- Handle jumping first
-	if npcData.IsJumping then
-		ClientNPCSimulator.SimulateJump(npcData, deltaTime)
-		return
-	end
+	-- Store position before movement for jump simulation
+	local preMovementPosition = npcData.Position
 
-	-- Determine what behavior to run
+	-- Determine what behavior to run (horizontal movement)
+	-- This runs even during jumps to maintain horizontal velocity like real Roblox characters
 	if npcData.CurrentTarget and npcData.Config.EnableCombatMovement then
 		-- Combat movement
 		ClientNPCSimulator.SimulateCombatMovement(npcData, deltaTime)
@@ -171,11 +169,27 @@ function ClientNPCSimulator.SimulateNPC(npcData, deltaTime)
 		ClientNPCSimulator.SimulateIdleWander(npcData, deltaTime)
 	end
 
+	-- Handle jumping (applies vertical movement on top of horizontal)
+	if npcData.IsJumping then
+		-- Get the horizontal movement that was just applied
+		local horizontalMovement = Vector3.new(
+			npcData.Position.X - preMovementPosition.X,
+			0,
+			npcData.Position.Z - preMovementPosition.Z
+		)
+
+		-- Reset position to pre-movement, then apply jump physics with horizontal offset
+		npcData.Position = preMovementPosition
+		ClientNPCSimulator.SimulateJumpWithHorizontal(npcData, deltaTime, horizontalMovement)
+	end
+
 	-- Check for stuck condition
 	ClientNPCSimulator.CheckStuck(npcData, deltaTime)
 
-	-- Periodic ground check for exploit mitigation
-	ClientNPCSimulator.PeriodicGroundCheck(npcData, deltaTime)
+	-- Periodic ground check for exploit mitigation (skip during jumps)
+	if not npcData.IsJumping then
+		ClientNPCSimulator.PeriodicGroundCheck(npcData, deltaTime)
+	end
 
 	-- Update last position
 	npcData.LastPosition = npcData.Position
@@ -546,47 +560,87 @@ function ClientNPCSimulator.SimulateIdleWander(npcData, deltaTime)
 end
 
 --[[
-	Simulate jump physics
+	Simulate jump physics (vertical only - legacy function)
 ]]
 function ClientNPCSimulator.SimulateJump(npcData, deltaTime)
-	if ClientJumpSimulator then
-		ClientJumpSimulator.SimulateJump(npcData, deltaTime)
-	else
-		-- Fallback: simple jump simulation
-		local gravity = workspace.Gravity
+	ClientNPCSimulator.SimulateJumpWithHorizontal(npcData, deltaTime, Vector3.zero)
+end
+
+--[[
+	Simulate jump physics with horizontal movement
+	This allows NPCs to maintain horizontal velocity while jumping, like real Roblox characters
+
+	@param npcData table - NPC data
+	@param deltaTime number - Time since last frame
+	@param horizontalMovement Vector3 - Horizontal movement to apply (X, 0, Z)
+]]
+function ClientNPCSimulator.SimulateJumpWithHorizontal(npcData, deltaTime, horizontalMovement)
+	if not npcData.IsJumping then
+		return
+	end
+
+	local gravity = workspace.Gravity
+	local position = npcData.Position
+	local velocity = npcData.JumpVelocity or 0
+
+	-- Initialize jump velocity if not set
+	if velocity == 0 and npcData.JumpStartTime == nil then
 		local jumpPower = npcData.Config.JumpPower or 50
+		velocity = jumpPower
+		npcData.JumpVelocity = velocity
+		npcData.JumpStartTime = tick()
+	end
 
-		if not npcData.JumpVelocity then
-			npcData.JumpVelocity = jumpPower
-		end
+	-- Check for timeout (3 second max jump duration)
+	local jumpTime = tick() - (npcData.JumpStartTime or tick())
+	if jumpTime > 3.0 then
+		ClientNPCSimulator.EndJump(npcData)
+		return
+	end
 
-		-- Apply gravity
-		npcData.JumpVelocity = npcData.JumpVelocity - gravity * deltaTime
+	-- Apply gravity to vertical velocity
+	velocity = velocity - gravity * deltaTime
+	npcData.JumpVelocity = velocity
 
-		-- Update position
-		local newY = npcData.Position.Y + npcData.JumpVelocity * deltaTime
-		npcData.Position = Vector3.new(npcData.Position.X, newY, npcData.Position.Z)
+	-- Calculate new position with both vertical and horizontal movement
+	local newX = position.X + horizontalMovement.X
+	local newY = position.Y + velocity * deltaTime
+	local newZ = position.Z + horizontalMovement.Z
+	local newPosition = Vector3.new(newX, newY, newZ)
 
-		-- Check if landed
-		local groundPos = ClientNPCSimulator.GetGroundPosition(npcData.Position)
+	-- Check if we're falling and near ground
+	if velocity < 0 then
+		local groundPos = ClientNPCSimulator.GetGroundPosition(newPosition)
+
 		if groundPos then
 			local heightOffset = npcData.HeightOffset or calculateHeightOffset(npcData)
-			local landingY = groundPos.Y + heightOffset
+			local groundY = groundPos.Y + heightOffset
 
-			if npcData.Position.Y <= landingY and npcData.JumpVelocity < 0 then
-				npcData.Position = Vector3.new(npcData.Position.X, landingY, npcData.Position.Z)
-				npcData.IsJumping = false
-				npcData.JumpVelocity = 0
+			if newY <= groundY then
+				-- Landed - snap to ground
+				newPosition = Vector3.new(newX, groundY, newZ)
+				ClientNPCSimulator.EndJump(npcData)
 			end
 		end
 	end
+
+	npcData.Position = newPosition
+end
+
+--[[
+	End a jump (landing or timeout)
+]]
+function ClientNPCSimulator.EndJump(npcData)
+	npcData.IsJumping = false
+	npcData.JumpVelocity = 0
+	npcData.JumpStartTime = nil
 end
 
 --[[
 	Check if NPC is stuck and handle unstuck behavior
 ]]
 function ClientNPCSimulator.CheckStuck(npcData, deltaTime)
-	-- Don't check for stuck while jumping - NPCs don't move horizontally much during jumps
+	-- Don't check for stuck while jumping - vertical movement shouldn't trigger stuck detection
 	if npcData.IsJumping then
 		npcData.StuckTime = 0
 		return
