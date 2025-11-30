@@ -624,3 +624,4 @@ If you encounter issues or have questions:
 **Made with ❤️ for the Roblox development community**
 
 _Version 1.0 - Last Updated: October 2025_
+_Version 1.1 - Added Physics-will-be-calculated-by-Client Optimization (1,000+ NPCs) - Last Updated: November 2025_
