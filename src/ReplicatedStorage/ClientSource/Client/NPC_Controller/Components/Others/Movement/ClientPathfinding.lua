@@ -67,27 +67,12 @@ function ClientPathfinding.CreatePath(npcData, visualModel)
 		return nil
 	end
 
-	-- Check for Humanoid first (traditional mode)
-	local humanoid = visualModel:FindFirstChildOfClass("Humanoid")
-
-	-- If no Humanoid, try AnimationController mode
+	local humanoid = visualModel:FindFirstChild("Humanoid")
 	if not humanoid then
-		local animController = visualModel:FindFirstChildOfClass("AnimationController")
-		if not animController then
-			-- Neither Humanoid nor AnimationController found
-			return nil
-		end
-
-		-- Create a temporary mock Humanoid for NoobPath compatibility
-		-- NoobPath only uses Humanoid for WalkSpeed and event connections
-		-- We override the behavior to work without actual Humanoid physics
-		humanoid = Instance.new("Humanoid")
-		humanoid.Name = "_PathfindingMockHumanoid"
-		humanoid.WalkSpeed = npcData.Config.WalkSpeed or 16
-		humanoid.Parent = visualModel
-
-		-- Mark for cleanup
-		npcData._mockHumanoidForPathfinding = humanoid
+		-- AnimationController mode - NoobPath requires Humanoid, use direct movement instead
+		-- This is intentional when USE_ANIMATION_CONTROLLER is enabled
+		-- The NPC will use simple direct movement via ClientNPCSimulator fallback
+		return nil
 	end
 
 	-- Get pathfinding config
@@ -300,14 +285,6 @@ function ClientPathfinding.Cleanup(npcData)
 			npcData.Pathfinding:Destroy()
 		end)
 		npcData.Pathfinding = nil
-	end
-
-	-- Cleanup mock Humanoid if we created one for pathfinding
-	if npcData._mockHumanoidForPathfinding then
-		pcall(function()
-			npcData._mockHumanoidForPathfinding:Destroy()
-		end)
-		npcData._mockHumanoidForPathfinding = nil
 	end
 end
 
