@@ -355,9 +355,8 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 				-- Update orientation to face waypoint
 				npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
 
-				-- Apply movement with collision check
+				-- Apply movement
 				local newPosition = currentPos + movement
-				newPosition = ClientNPCSimulator.CheckMovementCollision(npcData, currentPos, newPosition)
 				newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
 
 				npcData.Position = newPosition
@@ -403,9 +402,8 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 		-- Update orientation FIRST (before movement) to face movement direction
 		npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
 
-		-- Apply movement with collision check
+		-- Apply movement
 		local newPosition = currentPos + movement
-		newPosition = ClientNPCSimulator.CheckMovementCollision(npcData, currentPos, newPosition)
 
 		-- Ground check with proper height calculation
 		newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
@@ -541,9 +539,8 @@ function ClientNPCSimulator.SimulateCombatMovement(npcData, deltaTime)
 					npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction.Unit)
 				end
 
-				-- Apply movement with collision check
+				-- Apply movement
 				local newPosition = currentPos + movement
-				newPosition = ClientNPCSimulator.CheckMovementCollision(npcData, currentPos, newPosition)
 				newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
 
 				npcData.Position = newPosition
@@ -565,9 +562,7 @@ function ClientNPCSimulator.SimulateCombatMovement(npcData, deltaTime)
 		-- Update orientation FIRST (before movement) to face movement direction
 		npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
 
-		-- Apply movement with collision check
 		local newPosition = currentPos + movement
-		newPosition = ClientNPCSimulator.CheckMovementCollision(npcData, currentPos, newPosition)
 		newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
 
 		npcData.Position = newPosition
@@ -593,7 +588,6 @@ function ClientNPCSimulator.SimulateFleeMovement(npcData, deltaTime, targetPos, 
 		npcData.Destination = nil
 		npcData.MovementState = "Idle"
 		npcData.FleeNoticeStartTime = nil -- Reset notice timer
-		npcData.LastFleeTargetPos = nil -- Reset flee target tracking
 
 		-- Stop pathfinding if active
 		if ClientPathfinding then
@@ -700,9 +694,8 @@ function ClientNPCSimulator.SimulateFleeMovement(npcData, deltaTime, targetPos, 
 				-- Face flee direction (away from target)
 				npcData.Orientation = CFrame.lookAt(currentPos, currentPos + awayDirection)
 
-				-- Apply movement with collision check
+				-- Apply movement
 				local newPosition = currentPos + movement
-				newPosition = ClientNPCSimulator.CheckMovementCollision(npcData, currentPos, newPosition)
 				newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
 
 				npcData.Position = newPosition
@@ -723,9 +716,7 @@ function ClientNPCSimulator.SimulateFleeMovement(npcData, deltaTime, targetPos, 
 		-- Face flee direction
 		npcData.Orientation = CFrame.lookAt(currentPos, currentPos + awayDirection)
 
-		-- Apply movement with collision check
 		local newPosition = currentPos + movement
-		newPosition = ClientNPCSimulator.CheckMovementCollision(npcData, currentPos, newPosition)
 		newPosition = ClientNPCSimulator.SnapToGroundForNPC(npcData, newPosition)
 
 		npcData.Position = newPosition
@@ -952,7 +943,6 @@ end
 
 --[[
 	Snap position to ground for a specific NPC (uses cached height values)
-	Prevents "teleporting upward" by only snapping down, not up (unless height difference is small)
 
 	@param npcData table - NPC data
 	@param position Vector3 - Position to snap
@@ -962,72 +952,9 @@ function ClientNPCSimulator.SnapToGroundForNPC(npcData, position)
 	local groundPos = ClientNPCSimulator.GetGroundPosition(position)
 	if groundPos then
 		local heightOffset = npcData.HeightOffset or calculateHeightOffset(npcData)
-		local targetY = groundPos.Y + heightOffset
-		local currentY = position.Y
-		local heightDifference = targetY - currentY
-
-		-- If ground is higher than current position by more than 2 studs, trigger jump instead of teleport
-		if heightDifference > 2 and not npcData.IsJumping then
-			-- Trigger jump to reach higher ground
-			ClientNPCSimulator.TriggerJump(npcData)
-			-- Don't snap position yet, let jump physics handle it
-			return position
-		end
-
-		-- Allow snap down (falling) or small upward adjustments (stairs/slopes)
-		return Vector3.new(position.X, targetY, position.Z)
+		return Vector3.new(position.X, groundPos.Y + heightOffset, position.Z)
 	end
 	return position
-end
-
---[[
-	Check if movement from startPos to endPos would collide with walls
-	If collision detected, returns startPos (no movement), otherwise returns endPos
-
-	@param npcData table - NPC data
-	@param startPos Vector3 - Starting position
-	@param endPos Vector3 - Desired ending position
-	@return Vector3 - Safe position (endPos if no collision, startPos if blocked)
-]]
-function ClientNPCSimulator.CheckMovementCollision(npcData, startPos, endPos)
-	-- Calculate the movement vector
-	local movementVector = endPos - startPos
-	local movementDistance = movementVector.Magnitude
-
-	-- Skip check for very small movements (optimization)
-	if movementDistance < 0.01 then
-		return endPos
-	end
-
-	-- Create raycast params
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = {
-		workspace:FindFirstChild("Characters") or workspace,
-		workspace:FindFirstChild("VisualWaypoints"),
-		workspace:FindFirstChild("ClientSightVisualization"),
-	}
-
-	-- Add visual model to filter if it exists
-	if npcData.VisualModel then
-		raycastParams:AddToFilter(npcData.VisualModel)
-	end
-
-	-- Perform raycast from start to end position (add small upward offset to check at body height)
-	local rayStart = startPos + Vector3.new(0, 1, 0)
-	local rayEnd = endPos + Vector3.new(0, 1, 0)
-	local rayDirection = rayEnd - rayStart
-
-	local rayResult = workspace:Raycast(rayStart, rayDirection, raycastParams)
-
-	-- If we hit a collidable object, stop movement
-	if rayResult and rayResult.Instance.CanCollide then
-		-- Wall detected - don't move
-		return startPos
-	end
-
-	-- No collision, allow movement
-	return endPos
 end
 
 --[[
