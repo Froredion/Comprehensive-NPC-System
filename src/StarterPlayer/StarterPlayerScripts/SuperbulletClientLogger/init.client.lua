@@ -285,4 +285,19 @@ LogService.MessageOut:Connect(function(message, messageType)
 	sendLog(level, message)
 end)
 
+-- Client-side code executor for run_lua_code client context
+local ClientCodeExecutor = require(script.ClientCodeExecutor)
+
+-- Listen for client query requests via RemoteFunction
+local clientQueryFunction = ReplicatedStorage:WaitForChild("SuperbulletClientQuery", 10)
+if clientQueryFunction then
+	clientQueryFunction.OnClientInvoke = function(payload)
+		if type(payload) ~= "table" or type(payload.code) ~= "string" then
+			return { success = false, error = "Invalid client query payload" }
+		end
+
+		return ClientCodeExecutor.execute(payload.code)
+	end
+end
+
 print("[SuperbulletLogger] Client logger initialized (Studio only)")

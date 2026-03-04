@@ -1,0 +1,14 @@
+{
+  "className": "ModuleScript",
+  "properties": {
+    "Attributes": {},
+    "ScriptGuid": "{5693F5F9-83B8-44F3-BAA5-AC15701F2882}",
+    "SourceAssetId": {
+      "Int64": -1
+    },
+    "Tags": {
+      "Tags": []
+    }
+  },
+  "ignoreUnknownInstances": true
+}

@@ -1,21 +1,21 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Knit = require(ReplicatedStorage.Packages.Knit)
+local Superbullet = require(ReplicatedStorage.Packages.Superbullet)
 local Signal = require(ReplicatedStorage.Packages.Signal)
 
-local TemplateController = Knit.CreateController({
+local TemplateController = Superbullet.CreateController({
 	Name = "TemplateController",
 	Instance = script, -- Automatically initializes components
 })
 
---- Knit Services
+--- Superbullet Services
 
---- Knit Controllers
+--- Superbullet Controllers
 
-function TemplateController:KnitStart() 
+function TemplateController:SuperbulletStart()
 
 end
 
-function TemplateController:KnitInit()
+function TemplateController:SuperbulletInit()
 
 end
 

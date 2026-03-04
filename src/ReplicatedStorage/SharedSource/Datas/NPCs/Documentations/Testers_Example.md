@@ -1,8 +1,21 @@
-# NPC Testers
+# NPC Testers — SuperbulletAI Marketplace Assets
 
-Test environments for validating NPC behaviors and performance.
+Pre-built test environments for the NPC System, hosted on the **SuperbulletAI Marketplace** ([superbullet.ai](https://superbullet.ai/)).
+
+## How Asset IDs Work
+
+Each tester has a **SuperbulletAI Asset ID** (UUID). When a user requests a tester through SuperbulletAI, the platform uses this ID to automatically **retrieve, unpack, and upload** the corresponding test scripts and environment into the user's Roblox game — no manual setup required.
 
 ## Available Testers
+
+### Default NPC Tester (Recommended)
+
+| Asset ID | `734ddd0c-3dab-478f-bc26-b050728805e4` |
+|----------|----------------------------------------|
+
+The default tester bundle. Includes the core test scripts for general NPC spawning, mass stress testing, and jump/pathfinding debugging.
+
+### Specialized Testers
 
 | Tester        | Name                     | Asset ID                               | Description                                                                                             |
 |---------------|--------------------------|----------------------------------------|---------------------------------------------------------------------------------------------------------|

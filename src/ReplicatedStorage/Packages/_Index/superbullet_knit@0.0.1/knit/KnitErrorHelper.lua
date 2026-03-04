@@ -1,16 +1,16 @@
 --[=[
 	@class KnitErrorHelper
 	@private
-	
-	Helper module for generating context-aware error messages in Knit.
-	This module detects whether a caller is a Script/LocalScript or a Knit module
+
+	Helper module for generating context-aware error messages in Superbullet.
+	This module detects whether a caller is a Script/LocalScript or a Superbullet module
 	and provides appropriate error messages with solutions.
 ]=]
 
 local KnitErrorHelper = {}
 
 --[=[
-	Gets information about the caller of a Knit function.
+	Gets information about the caller of a Superbullet function.
 	@param knitModules table -- The services or controllers table to check against
 	@return Instance? -- The calling script/module instance
 	@return boolean | "module" -- false for Script/LocalScript, "module" for ModuleScript
@@ -59,7 +59,7 @@ function KnitErrorHelper.GetCallerInfo(knitModules: { [string]: any })
 			if foundInstance:IsA("Script") or foundInstance:IsA("LocalScript") then
 				return foundInstance, false
 			elseif foundInstance:IsA("ModuleScript") then
-				-- ModuleScripts are ambiguous - could be Knit modules or regular modules
+				-- ModuleScripts are ambiguous - could be Superbullet modules or regular modules
 				-- Mark as "module" to show both solutions
 				return foundInstance, "module"
 			else
@@ -76,7 +76,7 @@ end
 --[=[
 	Generates a context-aware error message based on the caller type.
 	Prints the full detailed guide to the console and returns a short error message.
-	@param started boolean -- Whether Knit has started
+	@param started boolean -- Whether Superbullet has started
 	@param methodName string -- The name of the method that was called (e.g., "GetService")
 	@param knitModules table -- The services or controllers table to check against
 	@param isClient boolean? -- Whether this is client-side (defaults to false)
@@ -88,7 +88,7 @@ function KnitErrorHelper.GetStartErrorMessage(
 	knitModules: { [string]: any },
 	isClient: boolean?
 ): string
-	-- If Knit has started, return empty string (no error)
+	-- If Superbullet has started, return empty string (no error)
 	if started then
 		return ""
 	end
@@ -100,7 +100,7 @@ function KnitErrorHelper.GetStartErrorMessage(
 	local detailedMessage = "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 		.. "❌ Cannot call "
 		.. methodName
-		.. " until Knit has been started\n"
+		.. " until Superbullet has been started\n"
 		.. "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
 	if instance and (instance:IsA("Script") or instance:IsA("LocalScript")) then
@@ -109,87 +109,87 @@ function KnitErrorHelper.GetStartErrorMessage(
 			.. "You are calling this from a "
 			.. instance.ClassName
 			.. ".\n"
-			.. "Solution: Use Knit.OnStart():await() to wait for Knit to start\n"
+			.. "Solution: Use Superbullet.OnStart():await() to wait for Superbullet to start\n"
 			.. "\n"
 			.. "Example:\n"
-			.. "  Knit.OnStart():await()\n"
-			.. '  local MyService = Knit.GetService("MyService")\n'
+			.. "  Superbullet.OnStart():await()\n"
+			.. '  local MyService = Superbullet.GetService("MyService")\n'
 
 		-- Add Controller example for client-side
 		if isClient then
-			detailedMessage = detailedMessage .. '  local MyController = Knit.GetController("MyController")\n'
+			detailedMessage = detailedMessage .. '  local MyController = Superbullet.GetController("MyController")\n'
 		end
 	elseif moduleType == "module" then
-		-- It's a ModuleScript - show both solutions since we can't determine if it's Knit or not
+		-- It's a ModuleScript - show both solutions since we can't determine if it's Superbullet or not
 		detailedMessage = detailedMessage .. "You are calling this from a ModuleScript.\n\n"
 
 		if isClient then
 			-- Client-side: Show both Service and Controller examples
 			detailedMessage = detailedMessage
-				.. "If this is a Knit Service:\n"
-				.. "  Move Knit.GetService() calls to KnitInit()\n\n"
+				.. "If this is a Superbullet Service:\n"
+				.. "  Move Superbullet.GetService() calls to SuperbulletInit()\n\n"
 				.. "  Example:\n"
-				.. "    function MyService:KnitInit()\n"
-				.. '        local OtherService = Knit.GetService("OtherService")\n'
+				.. "    function MyService:SuperbulletInit()\n"
+				.. '        local OtherService = Superbullet.GetService("OtherService")\n'
 				.. "        -- Use OtherService here\n"
 				.. "    end\n\n"
-				.. "If this is a Knit Controller:\n"
-				.. "  Move Knit.GetController() calls to KnitInit()\n\n"
+				.. "If this is a Superbullet Controller:\n"
+				.. "  Move Superbullet.GetController() calls to SuperbulletInit()\n\n"
 				.. "  Example:\n"
-				.. "    function MyController:KnitInit()\n"
-				.. '        local OtherController = Knit.GetController("OtherController")\n'
+				.. "    function MyController:SuperbulletInit()\n"
+				.. '        local OtherController = Superbullet.GetController("OtherController")\n'
 				.. "        -- Use OtherController here\n"
 				.. "    end\n\n"
 				.. "If this is a regular ModuleScript:\n"
-				.. "  Use Knit.OnStart():await() before calling\n\n"
+				.. "  Use Superbullet.OnStart():await() before calling\n\n"
 				.. "  Example:\n"
-				.. "    Knit.OnStart():await()\n"
-				.. '    local MyService = Knit.GetService("MyService")\n'
-				.. '    local MyController = Knit.GetController("MyController")\n'
+				.. "    Superbullet.OnStart():await()\n"
+				.. '    local MyService = Superbullet.GetService("MyService")\n'
+				.. '    local MyController = Superbullet.GetController("MyController")\n'
 		else
 			-- Server-side: Show only Service examples
 			detailedMessage = detailedMessage
-				.. "If this is a Knit Service:\n"
-				.. "  Move Knit.GetService() calls to KnitInit()\n\n"
+				.. "If this is a Superbullet Service:\n"
+				.. "  Move Superbullet.GetService() calls to SuperbulletInit()\n\n"
 				.. "  Example:\n"
-				.. "    function MyService:KnitInit()\n"
-				.. '        local OtherService = Knit.GetService("OtherService")\n'
+				.. "    function MyService:SuperbulletInit()\n"
+				.. '        local OtherService = Superbullet.GetService("OtherService")\n'
 				.. "        -- Use OtherService here\n"
 				.. "    end\n\n"
 				.. "If this is a regular ModuleScript:\n"
-				.. "  Use Knit.OnStart():await() before calling\n\n"
+				.. "  Use Superbullet.OnStart():await() before calling\n\n"
 				.. "  Example:\n"
-				.. "    Knit.OnStart():await()\n"
-				.. '    local MyService = Knit.GetService("MyService")\n'
+				.. "    Superbullet.OnStart():await()\n"
+				.. '    local MyService = Superbullet.GetService("MyService")\n'
 		end
 	else
 		-- Fallback for when we can't determine the source
-		detailedMessage = detailedMessage .. "Solution: Ensure Knit has started before calling this method\n\n"
+		detailedMessage = detailedMessage .. "Solution: Ensure Superbullet has started before calling this method\n\n"
 
 		if isClient then
 			-- Client-side: Show both Service and Controller examples
 			detailedMessage = detailedMessage
 				.. "For Scripts/LocalScripts/ModuleScripts:\n"
-				.. "  Knit.OnStart():await()\n"
-				.. '  local MyService = Knit.GetService("MyService")\n'
-				.. '  local MyController = Knit.GetController("MyController")\n\n'
-				.. "For Knit Services:\n"
-				.. "  function MyService:KnitInit()\n"
-				.. '      local OtherService = Knit.GetService("OtherService")\n'
+				.. "  Superbullet.OnStart():await()\n"
+				.. '  local MyService = Superbullet.GetService("MyService")\n'
+				.. '  local MyController = Superbullet.GetController("MyController")\n\n'
+				.. "For Superbullet Services:\n"
+				.. "  function MyService:SuperbulletInit()\n"
+				.. '      local OtherService = Superbullet.GetService("OtherService")\n'
 				.. "  end\n\n"
-				.. "For Knit Controllers:\n"
-				.. "  function MyController:KnitInit()\n"
-				.. '      local OtherController = Knit.GetController("OtherController")\n'
+				.. "For Superbullet Controllers:\n"
+				.. "  function MyController:SuperbulletInit()\n"
+				.. '      local OtherController = Superbullet.GetController("OtherController")\n'
 				.. "  end\n"
 		else
 			-- Server-side: Show only Service examples
 			detailedMessage = detailedMessage
 				.. "For Scripts/LocalScripts/ModuleScripts:\n"
-				.. "  Knit.OnStart():await()\n"
-				.. '  local MyService = Knit.GetService("MyService")\n\n'
-				.. "For Knit Services:\n"
-				.. "  function MyService:KnitInit()\n"
-				.. '      local OtherService = Knit.GetService("OtherService")\n'
+				.. "  Superbullet.OnStart():await()\n"
+				.. '  local MyService = Superbullet.GetService("MyService")\n\n'
+				.. "For Superbullet Services:\n"
+				.. "  function MyService:SuperbulletInit()\n"
+				.. '      local OtherService = Superbullet.GetService("OtherService")\n'
 				.. "  end\n"
 		end
 	end
@@ -201,7 +201,7 @@ function KnitErrorHelper.GetStartErrorMessage(
 	warn(detailedMessage)
 
 	-- Return a short error message for the assert
-	return "Cannot call " .. methodName .. " until Knit has been started. See output above for details."
+	return "Cannot call " .. methodName .. " until Superbullet has been started. See output above for details."
 end
 
 return KnitErrorHelper

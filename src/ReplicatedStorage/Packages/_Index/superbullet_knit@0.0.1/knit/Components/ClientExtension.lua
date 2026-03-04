@@ -73,7 +73,7 @@ local function validateRegistration(
 	)
 	assert(
 		service.KnitComm ~= nil,
-		`Service "{service.Name}" was not created with Knit.CreateService()`
+		`Service "{service.Name}" was not created with Superbullet.CreateService()`
 	)
 	assert(
 		service.Client[itemName] == nil,

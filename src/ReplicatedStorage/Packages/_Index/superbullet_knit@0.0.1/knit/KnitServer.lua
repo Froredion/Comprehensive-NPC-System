@@ -2,7 +2,7 @@
 	@interface Middleware
 	.Inbound ServerMiddleware?
 	.Outbound ServerMiddleware?
-	@within KnitServer
+	@within SuperbulletServer
 ]=]
 type Middleware = {
 	Inbound: ServerMiddleware?,
@@ -11,7 +11,7 @@ type Middleware = {
 
 --[=[
 	@type ServerMiddlewareFn (player: Player, args: {any}) -> (shouldContinue: boolean, ...: any)
-	@within KnitServer
+	@within SuperbulletServer
 
 	For more info, see [ServerComm](https://sleitnick.github.io/RbxUtil/api/ServerComm/) documentation.
 ]=]
@@ -19,7 +19,7 @@ type ServerMiddlewareFn = (player: Player, args: { any }) -> (boolean, ...any)
 
 --[=[
 	@type ServerMiddleware {ServerMiddlewareFn}
-	@within KnitServer
+	@within SuperbulletServer
 	An array of server middleware functions.
 ]=]
 type ServerMiddleware = { ServerMiddlewareFn }
@@ -31,14 +31,14 @@ type ServerMiddleware = { ServerMiddlewareFn }
 	.Middleware Middleware?
 	.Instance Instance?
 	.[any] any
-	@within KnitServer
+	@within SuperbulletServer
 	Used to define a service when creating it in `CreateService`.
 
-	The middleware tables provided will be used instead of the Knit-level
+	The middleware tables provided will be used instead of the Superbullet-level
 	middleware (if any). This allows fine-tuning each service's middleware.
 	These can also be left out or `nil` to not include middleware.
-	
-	If `Instance` is provided (typically `script`), Knit will automatically
+
+	If `Instance` is provided (typically `script`), Superbullet will automatically
 	initialize components found in a `Components` folder within that instance.
 ]=]
 type ServiceDef = {
@@ -55,7 +55,7 @@ type ServiceDef = {
 	.Client ServiceClient
 	.KnitComm Comm
 	.[any] any
-	@within KnitServer
+	@within SuperbulletServer
 ]=]
 type Service = {
 	Name: string,
@@ -68,7 +68,7 @@ type Service = {
 	@interface ServiceClient
 	.Server Service
 	.[any] any
-	@within KnitServer
+	@within SuperbulletServer
 ]=]
 type ServiceClient = {
 	Server: Service,
@@ -78,7 +78,7 @@ type ServiceClient = {
 --[=[
 	@interface KnitOptions
 	.Middleware Middleware?
-	@within KnitServer
+	@within SuperbulletServer
 
 	- Middleware will apply to all services _except_ ones that define
 	their own middleware.
@@ -94,20 +94,20 @@ local defaultOptions: KnitOptions = {
 local selectedOptions = nil
 
 --[=[
-	@class KnitServer
+	@class SuperbulletServer
 	@server
-	Knit server-side lets developers create services and expose methods and signals
+	Superbullet server-side lets developers create services and expose methods and signals
 	to the clients.
 
 	```lua
-	local Knit = require(somewhere.Knit)
+	local Superbullet = require(somewhere.Superbullet)
 
 	-- Load service modules within some folder:
-	Knit.AddServices(somewhere.Services)
+	Superbullet.AddServices(somewhere.Services)
 
-	-- Start Knit:
-	Knit.Start():andThen(function()
-		print("Knit started")
+	-- Start Superbullet:
+	Superbullet.Start():andThen(function()
+		print("Superbullet started")
 	end):catch(warn)
 	```
 ]=]
@@ -115,12 +115,12 @@ local KnitServer = {}
 
 --[=[
 	@prop Util Folder
-	@within KnitServer
+	@within SuperbulletServer
 	@readonly
-	References the Util folder. Should only be accessed when using Knit as
-	a standalone module. If using Knit from Wally, modules should just be
-	pulled in via Wally instead of relying on Knit's Util folder, as this
-	folder only contains what is necessary for Knit to run in Wally mode.
+	References the Util folder. Should only be accessed when using Superbullet as
+	a standalone module. If using Superbullet from Wally, modules should just be
+	pulled in via Wally instead of relying on Superbullet's Util folder, as this
+	folder only contains what is necessary for Superbullet to run in Wally mode.
 ]=]
 KnitServer.Util = (script.Parent :: Instance).Parent
 
@@ -167,11 +167,11 @@ end
 	Constructs a new service.
 
 	:::caution
-	Services must be created _before_ calling `Knit.Start()`.
+	Services must be created _before_ calling `Superbullet.Start()`.
 	:::
 	```lua
 	-- Create a service
-	local MyService = Knit.CreateService {
+	local MyService = Superbullet.CreateService {
 		Name = "MyService",
 		Client = {},
 	}
@@ -181,20 +181,20 @@ end
 		return msg:upper()
 	end
 
-	-- Knit will call KnitStart after all services have been initialized
-	function MyService:KnitStart()
+	-- Superbullet will call SuperbulletStart after all services have been initialized
+	function MyService:SuperbulletStart()
 		print("MyService started")
 	end
 
-	-- Knit will call KnitInit when Knit is first started
-	function MyService:KnitInit()
+	-- Superbullet will call SuperbulletInit when Superbullet is first started
+	function MyService:SuperbulletInit()
 		print("MyService initialize")
 	end
 	```
-	
+
 	With automatic component initialization:
 	```lua
-	local MyService = Knit.CreateService {
+	local MyService = Superbullet.CreateService {
 		Name = "MyService",
 		Instance = script,  -- Automatically initializes components
 	}
@@ -205,7 +205,7 @@ function KnitServer.CreateService(serviceDef: ServiceDef): Service
 	assert(type(serviceDef.Name) == "string", `Service.Name must be a string; got {type(serviceDef.Name)}`)
 	assert(#serviceDef.Name > 0, "Service.Name must be a non-empty string")
 	assert(not DoesServiceExist(serviceDef.Name), `Service "{serviceDef.Name}" already exists`)
-	assert(not started, `Services cannot be created after calling "Knit.Start()"`)
+	assert(not started, `Services cannot be created after calling "Superbullet.Start()"`)
 
 	local service = serviceDef
 	service.KnitComm = ServerComm.new(knitRepServiceFolder, serviceDef.Name)
@@ -227,11 +227,11 @@ end
 	Requires all the modules that are children of the given parent. This is an easy
 	way to quickly load all services that might be in a folder.
 	```lua
-	Knit.AddServices(somewhere.Services)
+	Superbullet.AddServices(somewhere.Services)
 	```
 ]=]
 function KnitServer.AddServices(parent: Instance): { Service }
-	assert(not started, `Services cannot be added after calling "Knit.Start()"`)
+	assert(not started, `Services cannot be added after calling "Superbullet.Start()"`)
 
 	local addedServices = {}
 	for _, v in parent:GetChildren() do
@@ -249,7 +249,7 @@ end
 	Requires all the modules that are descendants of the given parent.
 ]=]
 function KnitServer.AddServicesDeep(parent: Instance): { Service }
-	assert(not started, `Services cannot be added after calling "Knit.Start()"`)
+	assert(not started, `Services cannot be added after calling "Superbullet.Start()"`)
 
 	local addedServices = {}
 	for _, v in parent:GetDescendants() do
@@ -278,16 +278,16 @@ function KnitServer.GetService(serviceName: string): Service
 				warn(
 					string.format(
 						"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-							.. "⚠️  Knit Initialization Warning\n"
+							.. "⚠️  Superbullet Initialization Warning\n"
 							.. "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-							.. "GetService('%s') called during initialization, and Knit has been\n"
+							.. "GetService('%s') called during initialization, and Superbullet has been\n"
 							.. "initializing for more than 5 seconds.\n"
 							.. "\n"
 							.. "Possible causes:\n"
 							.. "• Service '%s' does not exist\n"
-							.. "• A KnitInit or component Init() is yielding\n"
+							.. "• A SuperbulletInit or component Init() is yielding\n"
 							.. "\n"
-							.. "This is blocking Knit from completing initialization.\n"
+							.. "This is blocking Superbullet from completing initialization.\n"
 							.. "\n"
 							.. "💡 If none of these are the issue, scroll up in the console\n"
 							.. "   to find any other warnings or errors that might be the cause.\n"
@@ -321,16 +321,16 @@ end
 	See [RemoteSignal](https://sleitnick.github.io/RbxUtil/api/RemoteSignal)
 	documentation for more info.
 	```lua
-	local MyService = Knit.CreateService {
+	local MyService = Superbullet.CreateService {
 		Name = "MyService",
 		Client = {
 			-- Create the signal marker, which will turn into a
-			-- RemoteSignal when Knit.Start() is called:
-			MySignal = Knit.CreateSignal(),
+			-- RemoteSignal when Superbullet.Start() is called:
+			MySignal = Superbullet.CreateSignal(),
 		},
 	}
 
-	function MyService:KnitInit()
+	function MyService:SuperbulletInit()
 		-- Connect to the signal:
 		self.Client.MySignal:Connect(function(player, ...) end)
 	end
@@ -377,16 +377,16 @@ end
 	documentation for more info.
 
 	```lua
-	local MyService = Knit.CreateService {
+	local MyService = Superbullet.CreateService {
 		Name = "MyService",
 		Client = {
 			-- Create the property marker, which will turn into a
-			-- RemoteProperty when Knit.Start() is called:
-			MyProperty = Knit.CreateProperty("HelloWorld"),
+			-- RemoteProperty when Superbullet.Start() is called:
+			MyProperty = Superbullet.CreateProperty("HelloWorld"),
 		},
 	}
 
-	function MyService:KnitInit()
+	function MyService:SuperbulletInit()
 		-- Change the value of the property:
 		self.Client.MyProperty:Set("HelloWorldAgain")
 	end
@@ -398,16 +398,16 @@ end
 
 --[=[
 	@function RegisterClientSignal
-	@within KnitServer
+	@within SuperbulletServer
 
 	Registers a new signal on the service's Client table from a submodule.
-	Must be called BEFORE Knit.Start().
+	Must be called BEFORE Superbullet.Start().
 
 	Returns the RemoteSignal immediately so you can chain :Connect().
 
 	```lua
 	-- In a submodule's Init():
-	Knit.RegisterClientSignal(QuestService, "OnQuestComplete"):Connect(function(player, questId)
+	Superbullet.RegisterClientSignal(QuestService, "OnQuestComplete"):Connect(function(player, questId)
 		print(player, "completed quest", questId)
 	end)
 	```
@@ -423,16 +423,16 @@ end
 
 --[=[
 	@function RegisterClientMethod
-	@within KnitServer
+	@within SuperbulletServer
 
 	Registers a new method on the service's Client table from a submodule.
-	Must be called BEFORE Knit.Start().
+	Must be called BEFORE Superbullet.Start().
 
 	Returns a wrapper with .OnServerInvoke property (Roblox-style).
 
 	```lua
 	-- In a submodule's Init():
-	Knit.RegisterClientMethod(QuestService, "GetActiveQuests").OnServerInvoke = function(self, player)
+	Superbullet.RegisterClientMethod(QuestService, "GetActiveQuests").OnServerInvoke = function(self, player)
 		return QuestManager:GetPlayerQuests(player)
 	end
 	```
@@ -447,16 +447,16 @@ end
 
 --[=[
 	@function RegisterClientProperty
-	@within KnitServer
+	@within SuperbulletServer
 
 	Registers a new property on the service's Client table from a submodule.
-	Must be called BEFORE Knit.Start().
+	Must be called BEFORE Superbullet.Start().
 
 	Returns the RemoteProperty immediately.
 
 	```lua
 	-- In a submodule's Init():
-	local prop = Knit.RegisterClientProperty(QuestService, "QuestConfig", { MaxActive = 5 })
+	local prop = Superbullet.RegisterClientProperty(QuestService, "QuestConfig", { MaxActive = 5 })
 	prop:Set({ MaxActive = 10 })
 	```
 
@@ -471,10 +471,10 @@ end
 
 --[=[
 	@return Promise
-	Starts Knit. Should only be called once.
+	Starts Superbullet. Should only be called once.
 
 	Optionally, `KnitOptions` can be passed in order to set
-	Knit's custom configurations.
+	Superbullet's custom configurations.
 
 	:::caution
 	Be sure that all services have been created _before_
@@ -482,14 +482,14 @@ end
 	:::
 
 	```lua
-	Knit.Start():andThen(function()
-		print("Knit started!")
+	Superbullet.Start():andThen(function()
+		print("Superbullet started!")
 	end):catch(warn)
 	```
-	
-	Example of Knit started with options:
+
+	Example of Superbullet started with options:
 	```lua
-	Knit.Start({
+	Superbullet.Start({
 		Middleware = {
 			Inbound = {
 				function(player, args)
@@ -499,13 +499,13 @@ end
 			},
 		},
 	}):andThen(function()
-		print("Knit started!")
+		print("Superbullet started!")
 	end):catch(warn)
 	```
 ]=]
 function KnitServer.Start(options: KnitOptions?)
 	if started then
-		return Promise.reject("Knit already started")
+		return Promise.reject("Superbullet already started")
 	end
 
 	started = true
@@ -523,6 +523,8 @@ function KnitServer.Start(options: KnitOptions?)
 			end
 		end
 	end
+
+	local failedServices = {}
 
 	return Promise.new(function(resolve)
 		local knitMiddleware = if selectedOptions.Middleware ~= nil then selectedOptions.Middleware else {}
@@ -555,24 +557,26 @@ function KnitServer.Start(options: KnitOptions?)
 		-- Init:
 		local promisesInitServices = {}
 		for _, service in services do
-			if type(service.KnitInit) == "function" then
+			local initFn = service.SuperbulletInit or service.KnitInit
+			if type(initFn) == "function" then
 				table.insert(
 					promisesInitServices,
-					Promise.new(function(r, reject)
+					Promise.new(function(r)
 						debug.setmemorycategory(service.Name)
 						local success, err = pcall(function()
-							service:KnitInit()
+							initFn(service)
 						end)
 						if success then
 							r()
 						else
+							failedServices[service.Name] = true
 							-- Get the source path using debug.info
-							local source = debug.info(service.KnitInit, "s")
+							local source = debug.info(initFn, "s")
 							local servicePath = source:match("^@?(.+)$") or service.Name
-							reject(
+							task.spawn(error,
 								string.format(
 									"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-										.. "❌ KnitInit Error in Service: %s\n"
+										.. "❌ SuperbulletInit Error in Service: %s\n"
 										.. "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 										.. "Service Path: %s\n"
 										.. "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -583,6 +587,7 @@ function KnitServer.Start(options: KnitOptions?)
 									tostring(err)
 								)
 							)
+							r()
 						end
 					end)
 				)
@@ -591,26 +596,34 @@ function KnitServer.Start(options: KnitOptions?)
 
 		resolve(Promise.all(promisesInitServices))
 	end):andThen(function()
-		-- Initialize Components (setup and init before KnitStart):
+		-- Initialize Components (setup and init before SuperbulletStart):
 		local servicesWithComponents = {}
 		for _, service in services do
-			if service.Instance then
-				ComponentInitializer.Initialize(service, service.Instance)
-				table.insert(servicesWithComponents, { service = service, instance = service.Instance })
-				-- service.Instance = nil -- Keep Instance available for runtime access
+			if service.Instance and not failedServices[service.Name] then
+				local ok, err = pcall(ComponentInitializer.Initialize, service, service.Instance)
+				if ok then
+					table.insert(servicesWithComponents, { service = service, instance = service.Instance })
+				else
+					failedServices[service.Name] = true
+					task.spawn(error, "[Superbullet] ComponentInitializer.Initialize failed for " .. service.Name .. ": " .. tostring(err))
+				end
 			end
 		end
 
-		-- Lock ClientExtension before KnitStart phase begins
+		-- Lock ClientExtension before SuperbulletStart phase begins
 		-- After this point, no new signals/methods/properties can be registered
 		clientExtensionLocked = true
 
 		-- Start:
 		for _, service in services do
-			if type(service.KnitStart) == "function" then
+			local startFn = service.SuperbulletStart or service.KnitStart
+			if type(startFn) == "function" and not failedServices[service.Name] then
 				task.spawn(function()
 					debug.setmemorycategory(service.Name)
-					service:KnitStart()
+					local success, err = pcall(startFn, service)
+					if not success then
+						task.spawn(error, "[Superbullet] SuperbulletStart error in " .. service.Name .. ": " .. tostring(err))
+					end
 				end)
 			end
 		end
@@ -618,13 +631,16 @@ function KnitServer.Start(options: KnitOptions?)
 		-- Start Components (after all services have started):
 		task.defer(function()
 			for _, data in servicesWithComponents do
-				ComponentInitializer.Start(data.service, data.instance)
+				local ok, err = pcall(ComponentInitializer.Start, data.service, data.instance)
+				if not ok then
+					task.spawn(error, "[Superbullet] ComponentInitializer.Start failed for " .. data.service.Name .. ": " .. tostring(err))
+				end
 			end
 		end)
 
 		-- Expose service remotes to everyone FIRST (before signaling ready)
 		knitRepServiceFolder.Parent = script.Parent
-		
+
 		-- Set ready attribute so clients know all remotes are registered
 		-- This happens AFTER component.Init() has registered all dynamic items
 		knitRepServiceFolder:SetAttribute("Ready", true)
@@ -640,12 +656,12 @@ end
 
 --[=[
 	@return Promise
-	Returns a promise that is resolved once Knit has started. This is useful
-	for any code that needs to tie into Knit services but is not the script
+	Returns a promise that is resolved once Superbullet has started. This is useful
+	for any code that needs to tie into Superbullet services but is not the script
 	that called `Start`.
 	```lua
-	Knit.OnStart():andThen(function()
-		local MyService = Knit.Services.MyService
+	Superbullet.OnStart():andThen(function()
+		local MyService = Superbullet.Services.MyService
 		MyService:DoSomething()
 	end):catch(warn)
 	```

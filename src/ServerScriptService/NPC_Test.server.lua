@@ -15,9 +15,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Knit = require(ReplicatedStorage.Packages.Knit)
 Knit.OnStart():await()
 
-if true then
-	return
-end
+-- if true then
+-- 	return
+-- end
 
 local NPC_Service = Knit.GetService("NPC_Service")
 

@@ -48,7 +48,7 @@ local OptimizationConfig = {
 		- NPCs tied to game progression
 		- Any NPC that affects gameplay outcomes
 	]]
-	UseClientPhysics = true, -- ENABLED
+	UseClientPhysics = false, -- ENABLED
 
 	--[[
 		USE_ANIMATION_CONTROLLER - Replace Humanoid with AnimationController

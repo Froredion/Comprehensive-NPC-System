@@ -1,7 +1,7 @@
 --[[
 	Components/init.lua
 
-	Exports all Knit components for use by KnitServer/KnitClient.
+	Exports all Superbullet components for use by SuperbulletServer/SuperbulletClient.
 	Part of SuperbulletFrameworkV1-Knit (2025)
 ]]
 
