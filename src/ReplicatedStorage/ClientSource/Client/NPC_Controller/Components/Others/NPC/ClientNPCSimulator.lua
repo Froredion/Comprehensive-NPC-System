@@ -399,8 +399,11 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 				local walkSpeed = npcData.Config.WalkSpeed or 16
 				local movement = direction * walkSpeed * deltaTime
 
-				-- Update orientation to face waypoint
-				npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
+				-- Smoothly interpolate orientation toward waypoint direction
+				local targetOrientation = CFrame.lookAt(currentPos, currentPos + direction)
+				local turnSpeed = npcData.Config.TurnSpeed or 10
+				local alpha = math.clamp(turnSpeed * deltaTime, 0, 1)
+				npcData.Orientation = npcData.Orientation:Lerp(targetOrientation, alpha)
 
 				-- Apply movement
 				local newPosition = currentPos + movement
@@ -452,8 +455,11 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 			movement = direction * distance
 		end
 
-		-- Update orientation FIRST (before movement) to face movement direction
-		npcData.Orientation = CFrame.lookAt(currentPos, currentPos + direction)
+		-- Smoothly interpolate orientation toward movement direction
+		local targetOrientation = CFrame.lookAt(currentPos, currentPos + direction)
+		local turnSpeed = npcData.Config.TurnSpeed or 10
+		local alpha = math.clamp(turnSpeed * deltaTime, 0, 1)
+		npcData.Orientation = npcData.Orientation:Lerp(targetOrientation, alpha)
 
 		-- Apply movement
 		local newPosition = currentPos + movement

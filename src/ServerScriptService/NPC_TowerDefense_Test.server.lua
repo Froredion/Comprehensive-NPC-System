@@ -108,7 +108,7 @@ local function spawnWaveEnemy()
 		-- Stats
 		MaxHealth = 100,
 		WalkSpeed = 7,
-		JumpPower = 50,
+		JumpPower = 0, -- TD enemies don't need to jump
 
 		-- Behavior - disable automatic behaviors for controlled movement
 		SightRange = 0, -- Disable detection
