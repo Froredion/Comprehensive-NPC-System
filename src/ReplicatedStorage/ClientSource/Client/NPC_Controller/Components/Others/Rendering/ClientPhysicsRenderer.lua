@@ -609,11 +609,14 @@ function ClientPhysicsRenderer.SetupHealthBar(visualModel, healthValue, maxHealt
 		return
 	end
 
+	-- Get model scale so the overhead UI scales with the character
+	local modelScale = math.max(visualModel:GetScale(), 0.5)
+
 	-- Create billboard GUI (contains name + health bar)
 	local billboardGui = Instance.new("BillboardGui")
 	billboardGui.Name = "HealthBar"
-	billboardGui.Size = UDim2.new(4, 0, 1, 0)
-	billboardGui.StudsOffset = Vector3.new(0, 3, 0)
+	billboardGui.Size = UDim2.new(4 * modelScale, 0, 1 * modelScale, 0)
+	billboardGui.StudsOffset = Vector3.new(0, 3 * modelScale, 0)
 	billboardGui.AlwaysOnTop = false
 	billboardGui.MaxDistance = 100
 
