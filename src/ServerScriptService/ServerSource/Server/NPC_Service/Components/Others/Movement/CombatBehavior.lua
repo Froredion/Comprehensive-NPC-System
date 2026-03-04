@@ -283,8 +283,10 @@ local function meleeAttackThread(npcData)
 
 			if success then
 				KnockbackHandler:ApplyKnockback(hitTarget, npcHRP.Position)
-				CombatService.Client.PlayPunchEffect:FireAll(hitTarget)
-				CombatService.Client.PlayHitSound:FireAll(hitTarget)
+				if CombatService then
+					CombatService.Client.PlayPunchEffect:FireAll(hitTarget)
+					CombatService.Client.PlayHitSound:FireAll(hitTarget)
+				end
 			end
 		end
 	end
@@ -318,7 +320,8 @@ end
 function CombatBehavior.Init()
 	NPC_Service = Knit.GetService("NPC_Service")
 	DamageService = Knit.GetService("DamageService")
-	CombatService = Knit.GetService("CombatService")
+	local ok, service = pcall(function() return Knit.GetService("CombatService") end)
+	CombatService = ok and service or nil
 
 	-- Load PunchSettings (same animations/sounds as player punches) — optional for vanilla NPCs
 	local datas = ReplicatedStorage:WaitForChild("SharedSource"):WaitForChild("Datas", 10)

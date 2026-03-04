@@ -345,7 +345,8 @@ end
 
 function ClientPhysicsCombat.Init()
 	NPC_Service = Knit.GetService("NPC_Service")
-	CombatService = Knit.GetService("CombatService")
+	local ok, service = pcall(function() return Knit.GetService("CombatService") end)
+	CombatService = ok and service or nil
 
 	-- Load combat settings (optional — may not exist for vanilla NPCs)
 	local datas = ReplicatedStorage:WaitForChild("SharedSource"):WaitForChild("Datas", 10)
