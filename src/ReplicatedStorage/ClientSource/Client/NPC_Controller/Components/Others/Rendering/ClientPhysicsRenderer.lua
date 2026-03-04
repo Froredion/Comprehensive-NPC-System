@@ -24,6 +24,7 @@ local ClientPhysicsRenderer = {}
 local RenderConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.RenderConfig)
 local OptimizationConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.OptimizationConfig)
 local NPCAnimator -- Loaded in Init
+local NPC_ServiceClient -- Loaded in Init (optional, only if CombatController exists)
 
 ---- Collision Configuration
 local collisionGroupName = "NPCs" -- Default fallback
@@ -34,6 +35,8 @@ local LocalPlayer = Players.LocalPlayer
 
 ---- Constants
 local UNRENDER_HYSTERESIS = 1.3 -- Unrender at 1.3x render distance
+local KNOCKBACK_DECAY_RATE = 8 -- How fast knockback velocity decays (per second)
+local KNOCKBACK_MIN_SPEED = 0.5 -- Stop knockback when speed falls below this
 
 --[[
 	Calculate height offset from visual model
@@ -182,6 +185,70 @@ function ClientPhysicsRenderer.ShouldRenderByDistance(npcFolder)
 end
 
 --[[
+	Ragdoll a client-physics NPC on death.
+	Stops animations, disconnects CFrame sync, unanchors parts,
+	destroys Motor6D joints so the rig collapses under gravity.
+
+	@param npcID string - The NPC ID
+]]
+function ClientPhysicsRenderer.RagdollNPC(npcID)
+	local renderData = RenderedNPCs[npcID]
+	if not renderData or not renderData.visualModel or renderData.ragdolled then
+		return
+	end
+	renderData.ragdolled = true
+
+	local visualModel = renderData.visualModel
+
+	-- 1. Stop all playing AnimationTracks
+	local animHost = visualModel:FindFirstChildOfClass("Humanoid") or visualModel:FindFirstChildOfClass("AnimationController")
+	if animHost then
+		local animator = animHost:FindFirstChildOfClass("Animator")
+		if animator then
+			for _, track in pairs(animator:GetPlayingAnimationTracks()) do
+				track:Stop(0)
+			end
+		end
+	end
+
+	-- 2. Disconnect the RenderStepped CFrame sync connection (and all other connections)
+	if renderData.connections then
+		for _, connection in pairs(renderData.connections) do
+			if connection then
+				pcall(function()
+					connection:Disconnect()
+				end)
+			end
+		end
+		renderData.connections = {}
+	end
+
+	-- 3. Cleanup animator to stop idle/walk animations
+	if NPCAnimator then
+		NPCAnimator.Cleanup(visualModel)
+	end
+
+	-- 4. Unanchor all BaseParts and destroy Motor6D joints
+	for _, descendant in pairs(visualModel:GetDescendants()) do
+		if descendant:IsA("Motor6D") then
+			descendant:Destroy()
+		end
+	end
+
+	for _, descendant in pairs(visualModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = false
+			-- Enable CanCollide on body-sized parts (not tiny accessories)
+			-- Typical body parts are > 0.5 studs in all dimensions
+			local size = descendant.Size
+			if size.X > 0.5 and size.Y > 0.5 and size.Z > 0.5 then
+				descendant.CanCollide = true
+			end
+		end
+	end
+end
+
+--[[
 	Render an NPC (create visual model)
 ]]
 function ClientPhysicsRenderer.RenderNPC(npcID)
@@ -236,6 +303,9 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 	local visualModel = originalModel:Clone()
 	visualModel.Name = npcID .. "_Visual"
 
+	-- Tag visual model with NPC ID for client-side hit detection (UseClientPhysics combat)
+	visualModel:SetAttribute("ClientPhysicsNPCID", npcID)
+
 	-- Handle Humanoid vs AnimationController based on optimization config
 	local humanoid = visualModel:FindFirstChildOfClass("Humanoid")
 	local useAnimationController = OptimizationConfig.USE_ANIMATION_CONTROLLER and OptimizationConfig.UseClientPhysics
@@ -284,17 +354,22 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 	end
 
 	-- Make all parts non-collidable (client-side visuals only) and apply collision group
+	-- HumanoidRootPart gets CanQuery=true so GetPartBoundsInBox can detect it for combat hit detection
 	for _, descendant in pairs(visualModel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.CanCollide = false
 			descendant.CanTouch = false
-			descendant.CanQuery = false
-			
+			if descendant.Name == "HumanoidRootPart" then
+				descendant.CanQuery = true -- Allows client-side hit detection (GetPartBoundsInBox)
+			else
+				descendant.CanQuery = false
+			end
+
 			-- Apply collision group for NPCs
 			descendant.CollisionGroup = collisionGroupName
 		end
 	end
-	
+
 	-- Monitor for new parts (accessories, tools, etc.) and apply collision group
 	visualModel.DescendantAdded:Connect(function(descendant)
 		if descendant:IsA("BasePart") then
@@ -367,7 +442,7 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 	local hrp = visualModel:FindFirstChild("HumanoidRootPart")
 
 	if hrp and positionValue then
-		local renderSteppedConnection = RunService.RenderStepped:Connect(function()
+		local renderSteppedConnection = RunService.RenderStepped:Connect(function(dt)
 			if visualModel and visualModel.Parent and hrp and hrp.Parent then
 				--[[
 					POSITION SOURCE PRIORITY:
@@ -395,17 +470,67 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 					end
 				end
 
+				-- Apply knockback: update npcData.Position directly each frame
+				-- This ensures the simulator and renderer stay in sync (no separate visual offset needed)
+				local renderData = RenderedNPCs[npcID]
+				if renderData and renderData.knockbackVelocity then
+					local kb = renderData.knockbackVelocity
+					if kb.Magnitude > KNOCKBACK_MIN_SPEED then
+						local frameOffset = kb * dt
+						-- Decay velocity exponentially
+						renderData.knockbackVelocity = kb * math.exp(-KNOCKBACK_DECAY_RATE * dt)
+
+						-- Push knockback directly into the position source
+						local ClientNPCManagerModule2 = script.Parent.Parent.NPC:FindFirstChild("ClientNPCManager")
+						if ClientNPCManagerModule2 then
+							local mgr = require(ClientNPCManagerModule2)
+							local simData = mgr.GetSimulatedNPC(npcID)
+							if simData then
+								simData.Position = simData.Position + frameOffset
+								targetPosition = simData.Position
+							else
+								positionValue.Value = positionValue.Value + frameOffset
+								targetPosition = positionValue.Value
+							end
+						else
+							positionValue.Value = positionValue.Value + frameOffset
+							targetPosition = positionValue.Value
+						end
+					else
+						renderData.knockbackVelocity = nil
+					end
+				end
+
 				hrp.CFrame = CFrame.new(targetPosition) * targetRotation
 			end
 		end)
 		table.insert(connections, renderSteppedConnection)
 	end
 
-	-- Setup health bar
+	-- Setup health bar and name display
 	local healthValue = npcFolder:FindFirstChild("Health")
 	local maxHealthValue = npcFolder:FindFirstChild("MaxHealth")
 	if healthValue and maxHealthValue then
-		ClientPhysicsRenderer.SetupHealthBar(visualModel, healthValue, maxHealthValue, connections)
+		local npcName = config.Name or "NPC"
+		ClientPhysicsRenderer.SetupHealthBar(visualModel, healthValue, maxHealthValue, connections, npcName)
+	end
+
+	-- Watch IsAlive for death ragdoll
+	local isAliveValue = npcFolder:FindFirstChild("IsAlive")
+	if isAliveValue then
+		if isAliveValue.Value == false then
+			-- Already dead when rendered (edge case)
+			task.defer(function()
+				ClientPhysicsRenderer.RagdollNPC(npcID)
+			end)
+		else
+			local isAliveConnection = isAliveValue.Changed:Connect(function(newValue)
+				if newValue == false then
+					ClientPhysicsRenderer.RagdollNPC(npcID)
+				end
+			end)
+			table.insert(connections, isAliveConnection)
+		end
 	end
 
 	-- Setup animator (supports both Humanoid and AnimationController modes)
@@ -468,27 +593,52 @@ function ClientPhysicsRenderer.RenderNPC(npcID)
 end
 
 --[[
-	Setup health bar for visual model
+	Setup health bar and name display for visual model
+	Health bar is hidden until the NPC takes damage.
+	Name label is always visible above the health bar.
+
+	@param visualModel Model - The NPC visual model
+	@param healthValue NumberValue - Server health value
+	@param maxHealthValue NumberValue - Server max health value
+	@param connections table - Connection list for cleanup
+	@param npcName string - Display name for the NPC
 ]]
-function ClientPhysicsRenderer.SetupHealthBar(visualModel, healthValue, maxHealthValue, connections)
+function ClientPhysicsRenderer.SetupHealthBar(visualModel, healthValue, maxHealthValue, connections, npcName)
 	local primaryPart = visualModel.PrimaryPart or visualModel:FindFirstChild("HumanoidRootPart")
 	if not primaryPart then
 		return
 	end
 
-	-- Create health bar UI
+	-- Create billboard GUI (contains name + health bar)
 	local billboardGui = Instance.new("BillboardGui")
 	billboardGui.Name = "HealthBar"
-	billboardGui.Size = UDim2.new(4, 0, 0.5, 0)
+	billboardGui.Size = UDim2.new(4, 0, 1, 0)
 	billboardGui.StudsOffset = Vector3.new(0, 3, 0)
 	billboardGui.AlwaysOnTop = false
 	billboardGui.MaxDistance = 100
 
+	-- Name label (always visible, top half of billboard)
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "NameLabel"
+	nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+	nameLabel.Position = UDim2.new(0, 0, 0, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = npcName or "NPC"
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextStrokeTransparency = 0.5
+	nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	nameLabel.TextScaled = true
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.Parent = billboardGui
+
+	-- Health bar background (bottom half, hidden until damaged)
 	local frame = Instance.new("Frame")
 	frame.Name = "Background"
-	frame.Size = UDim2.new(1, 0, 1, 0)
+	frame.Size = UDim2.new(1, 0, 0.35, 0)
+	frame.Position = UDim2.new(0, 0, 0.55, 0)
 	frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 	frame.BorderSizePixel = 0
+	frame.Visible = false -- Hidden until damaged
 	frame.Parent = billboardGui
 
 	local corner = Instance.new("UICorner")
@@ -513,6 +663,11 @@ function ClientPhysicsRenderer.SetupHealthBar(visualModel, healthValue, maxHealt
 		local percentage = math.clamp(newHealth / maxHealthValue.Value, 0, 1)
 		healthBar.Size = UDim2.new(percentage, 0, 1, 0)
 
+		-- Show health bar on first damage
+		if percentage < 1 and not frame.Visible then
+			frame.Visible = true
+		end
+
 		-- Color gradient: green -> yellow -> red
 		if percentage > 0.5 then
 			healthBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Green
@@ -522,7 +677,7 @@ function ClientPhysicsRenderer.SetupHealthBar(visualModel, healthValue, maxHealt
 			healthBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0) -- Red
 		end
 
-		-- Hide if dead
+		-- Hide everything if dead
 		if newHealth <= 0 then
 			billboardGui.Enabled = false
 		end
@@ -671,6 +826,61 @@ function ClientPhysicsRenderer.RefreshAll()
 	end
 end
 
+--[[
+	Play attack animation on a rendered UseClientPhysics NPC
+	Reads AttackAnimations and AttackSounds from the NPC's own config (no hardcoded combat imports).
+
+	@param npcID string - The NPC ID
+	@param comboIndex number - Which animation combo to play (1, 2, etc.)
+]]
+function ClientPhysicsRenderer.PlayAttackAnimation(npcID, comboIndex, animSpeed)
+	local renderData = RenderedNPCs[npcID]
+	if not renderData or not renderData.visualModel then
+		return
+	end
+
+	local visualModel = renderData.visualModel
+	local npcConfig = renderData.config
+
+	-- Read attack animations from NPC's own config (set by server in configData)
+	local anims = npcConfig and npcConfig.AttackAnimations or {}
+	if #anims == 0 then
+		return
+	end
+
+	local animId = anims[comboIndex] or anims[1]
+
+	-- Find the animation host (Humanoid or AnimationController)
+	local humanoid = visualModel:FindFirstChildOfClass("Humanoid")
+	local animController = visualModel:FindFirstChildOfClass("AnimationController")
+	local animHost = humanoid or animController
+
+	if not animHost then
+		return
+	end
+
+	local anim = Instance.new("Animation")
+	anim.AnimationId = animId
+	local track = animHost:LoadAnimation(anim)
+	track:Play(0, 1, animSpeed or 1)
+
+	-- Play attack sound from NPC's own config
+	local attackSounds = npcConfig and npcConfig.AttackSounds or {}
+	if #attackSounds > 0 then
+		local soundId = attackSounds[math.min(comboIndex, #attackSounds)]
+		local hrp = visualModel:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local sound = Instance.new("Sound")
+			sound.SoundId = soundId
+			sound.Parent = hrp
+			sound:Play()
+			sound.Ended:Once(function()
+				sound:Destroy()
+			end)
+		end
+	end
+end
+
 function ClientPhysicsRenderer.Start()
 	-- Try to load CollisionConfig for collision group names
 	local collisionConfigModule = ReplicatedStorage.SharedSource.Datas:WaitForChild("CollisionConfig", 2)
@@ -683,9 +893,24 @@ function ClientPhysicsRenderer.Start()
 	else
 		print("[ClientPhysicsRenderer] CollisionConfig not found, using default collision group:", collisionGroupName)
 	end
-	
+
 	-- Initialize the renderer
 	ClientPhysicsRenderer.Initialize()
+
+	-- Listen for NPC attack animations from server
+	if NPC_ServiceClient then
+		NPC_ServiceClient.NPCAttackTriggered:Connect(function(npcID, comboIndex, animSpeed)
+			ClientPhysicsRenderer.PlayAttackAnimation(npcID, comboIndex, animSpeed)
+		end)
+
+		-- Listen for NPC knockback from server (player hit a client-physics NPC)
+		NPC_ServiceClient.NPCKnockbackTriggered:Connect(function(npcID, knockbackVelocity)
+			local renderData = RenderedNPCs[npcID]
+			if renderData and not renderData.ragdolled then
+				renderData.knockbackVelocity = knockbackVelocity
+			end
+		end)
+	end
 end
 
 function ClientPhysicsRenderer.Init()
@@ -693,6 +918,12 @@ function ClientPhysicsRenderer.Init()
 	local animatorModule = script.Parent:FindFirstChild("NPCAnimator")
 	if animatorModule then
 		NPCAnimator = require(animatorModule)
+	end
+
+	-- Only connect attack animation signals if CombatController exists in the project
+	if ReplicatedStorage.ClientSource.Client:FindFirstChild("CombatController") then
+		local Knit = require(ReplicatedStorage.Packages.Knit)
+		NPC_ServiceClient = Knit.GetService("NPC_Service")
 	end
 end
 

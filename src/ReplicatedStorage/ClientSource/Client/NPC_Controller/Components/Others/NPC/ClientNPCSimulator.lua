@@ -274,7 +274,6 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 			usePathfinding = true
 		end
 		if usePathfinding then
-			print("[ClientNPCSimulator] Lazy pathfinding creation for NPC:", npcData.VisualModel)
 			npcData.Pathfinding = ClientPathfinding.CreatePath(npcData, npcData.VisualModel)
 		end
 	end
@@ -919,10 +918,11 @@ end
 	Try to unstuck an NPC
 ]]
 function ClientNPCSimulator.TryUnstuck(npcData)
-	-- Try jumping to get unstuck
-	if not npcData.IsJumping then
+	-- Try jumping to get unstuck (only if jumping is enabled)
+	local jumpPower = npcData.Config.JumpPower or 50
+	if not npcData.IsJumping and jumpPower > 0 then
 		npcData.IsJumping = true
-		npcData.JumpVelocity = npcData.Config.JumpPower or 50
+		npcData.JumpVelocity = jumpPower
 	end
 
 	-- Note: We don't clear destination anymore - the stuck detection is already
@@ -1032,9 +1032,10 @@ end
 	Trigger a jump for an NPC
 ]]
 function ClientNPCSimulator.TriggerJump(npcData)
-	if not npcData.IsJumping then
+	local jumpPower = npcData.Config.JumpPower or 50
+	if not npcData.IsJumping and jumpPower > 0 then
 		npcData.IsJumping = true
-		npcData.JumpVelocity = npcData.Config.JumpPower or 50
+		npcData.JumpVelocity = jumpPower
 	end
 end
 

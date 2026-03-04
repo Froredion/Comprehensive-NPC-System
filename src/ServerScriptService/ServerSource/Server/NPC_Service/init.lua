@@ -12,6 +12,8 @@ local NPC_Service = Knit.CreateService({
 		NPCBatchPositionUpdated = Knit.CreateSignal(), -- Broadcast batched NPC position updates (optimized)
 		NPCsOrphaned = Knit.CreateSignal(), -- Broadcast when NPCs need new owners
 		NPCJumpTriggered = Knit.CreateSignal(), -- Broadcast when NPC should jump (for testing/manual control)
+		NPCAttackTriggered = Knit.CreateSignal(), -- Broadcast when NPC attacks (for client-side animation)
+		NPCKnockbackTriggered = Knit.CreateSignal(), -- Broadcast when NPC should be knocked back (for client-side offset)
 	},
 
 	-- Registry of all active NPCs (traditional server-physics NPCs)
@@ -45,6 +47,11 @@ local OptimizationConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.Opt
 		- UsePathfinding: boolean? - Use advanced pathfinding vs simple MoveTo() (default: true)
 		- EnableIdleWander: boolean? - Enable random wandering (default: true)
 		- EnableCombatMovement: boolean? - Enable combat movement (default: true)
+		- AttackDamage: number? - Melee attack damage per hit (default: 2)
+		- AttackCooldown: number? - Seconds between attacks (default: 1.5)
+		- AttackRange: number? - Max distance to attack target in studs (default: 6)
+		- InitialAttackCooldown: number? - Delay before first attack after spawning/engaging (default: 3.0)
+		- EnableMeleeAttack: boolean? - Enable NPC melee attacks for Melee NPCs (default: true)
 		- ClientRenderData: table? - Optional visual customization for client-side rendering
 		- CustomData: table? - Game-specific attributes for gameplay logic
 			* Scale: number? - Visual scale multiplier (default: 1.0)
@@ -216,6 +223,21 @@ end
 ---- Client Methods for UseClientPhysics ----
 
 --[[
+	Client method: Report a hit on a UseClientPhysics NPC
+	Called by client when their punch/slash hitbox detects a client-physics NPC visual model.
+	Delegates validation and damage to ClientPhysicsCombat component.
+
+	@param player Player - The player who hit the NPC
+	@param npcID string - The NPC ID (from ClientPhysicsNPCID attribute)
+	@param damageType string - "punch" or "slash"
+]]
+function NPC_Service.Client:HitClientPhysicsNPC(player, npcID, damageType)
+	if NPC_Service.Components.ClientPhysicsCombat then
+		NPC_Service.Components.ClientPhysicsCombat.HandlePlayerHit(player, npcID, damageType)
+	end
+end
+
+--[[
 	Client method: Update NPC position (called by simulating client)
 	Legacy method - kept for backwards compatibility when USE_BATCHED_UPDATES = false
 ]]
@@ -264,6 +286,10 @@ function NPC_Service:KnitInit()
 
 	---- Handle player disconnection for UseClientPhysics system
 	Players.PlayerRemoving:Connect(function(player)
+		if NPC_Service.Components.ClientPhysicsCombat then
+			NPC_Service.Components.ClientPhysicsCombat.HandlePlayerLeft(player)
+		end
+
 		if NPC_Service.Components.ClientPhysicsSync then
 			NPC_Service.Components.ClientPhysicsSync.HandlePlayerLeft(player)
 		end

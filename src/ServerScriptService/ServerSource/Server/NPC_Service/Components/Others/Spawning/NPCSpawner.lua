@@ -23,10 +23,8 @@ local DISABLED_STATES = {
 	Enum.HumanoidStateType.FallingDown,
 	Enum.HumanoidStateType.Flying,
 	Enum.HumanoidStateType.PlatformStanding,
-	Enum.HumanoidStateType.Ragdoll,
 	Enum.HumanoidStateType.Seated,
 	Enum.HumanoidStateType.Swimming,
-	Enum.HumanoidStateType.Dead,
 }
 
 --[[
@@ -261,7 +259,7 @@ local function disableUnnecessaryHumanoidStates(humanoid)
 		humanoid:SetStateEnabled(state, false)
 	end
 
-	humanoid.BreakJointsOnDeath = false
+	humanoid.BreakJointsOnDeath = true
 end
 
 --[[
@@ -279,7 +277,29 @@ local function setupCleanup(npcModel, npcData)
 		end
 		markedForDeletion = true
 
-		-- Delegate cleanup to Set component
+		-- Immediately stop all behavior (movement, sight, orientation)
+		npcData.CleanedUp = true
+		npcData.CurrentTarget = nil
+		npcData.Destination = nil
+		npcData.MovementState = nil
+
+		-- Stop pathfinding immediately
+		if npcData.UsePathfinding and npcData.Pathfinding then
+			pcall(function()
+				npcData.Pathfinding:Stop()
+			end)
+		end
+
+		-- Stop humanoid movement immediately
+		local humanoid = npcModel:FindFirstChild("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = 0
+			pcall(function()
+				humanoid:MoveTo(npcModel.PrimaryPart.Position)
+			end)
+		end
+
+		-- Delegate full cleanup (model destruction) after delay
 		task.delay(CLEANUP_DELAY, function()
 			if NPC_Service and NPC_Service.SetComponent then
 				NPC_Service.SetComponent:DestroyNPC(npcModel)
@@ -328,6 +348,13 @@ local function initializeNPCData(npcModel, config)
 		UsePathfinding = config.UsePathfinding ~= false, -- Default true
 		EnableIdleWander = config.EnableIdleWander ~= false, -- Default true
 		EnableCombatMovement = config.EnableCombatMovement ~= false, -- Default true
+
+		-- Combat State
+		AttackDamage = config.AttackDamage or 2,
+		AttackCooldown = config.AttackCooldown or 1.5,
+		AttackRange = config.AttackRange or 6,
+		InitialAttackCooldown = config.InitialAttackCooldown or 3.0,
+		EnableMeleeAttack = config.EnableMeleeAttack ~= false, -- Default true
 
 		-- Targeting State
 		CurrentTarget = nil,
@@ -450,6 +477,10 @@ function NPCSpawner:SpawnNPC(config)
 
 		if NPC_Service.Components.SightDetector then
 			NPC_Service.Components.SightDetector:SetupSightDetector(npcData)
+		end
+
+		if NPC_Service.Components.CombatBehavior then
+			NPC_Service.Components.CombatBehavior.SetupCombatBehavior(npcData)
 		end
 	end)
 

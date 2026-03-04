@@ -21,6 +21,9 @@ local NPC_Service
 ---- Configuration
 local OptimizationConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.OptimizationConfig)
 
+---- Combat Settings (optional - loaded if available)
+local PunchSettings
+
 ---- Storage
 local ActiveNPCsFolder -- Created in Init
 
@@ -156,10 +159,20 @@ local function createNPCDataFolder(npcID, config, position)
 		MeleeOffsetRange = config.MeleeOffsetRange or 5,
 		EnableIdleWander = config.EnableIdleWander ~= false,
 		EnableCombatMovement = config.EnableCombatMovement ~= false,
+		UsePathfinding = config.UsePathfinding ~= false, -- Default true, tower defense sets false
 		SpawnPosition = { X = position.X, Y = position.Y, Z = position.Z },
 		MaxWanderRadius = config.MaxWanderRadius or OptimizationConfig.ExploitMitigation.DEFAULT_MAX_WANDER_RADIUS,
 		CustomData = config.CustomData or {},
 		ClientRenderData = config.ClientRenderData or {},
+		-- Combat config (for ClientPhysicsCombat server-side attack loop)
+		AttackDamage = config.AttackDamage or 2,
+		AttackCooldown = config.AttackCooldown or 1.5,
+		AttackRange = config.AttackRange or 6,
+		EnableMeleeAttack = config.EnableMeleeAttack ~= false,
+		InitialAttackCooldown = config.InitialAttackCooldown or 3.0,
+		-- Attack animations/sounds for client-side playback (read from PunchSettings if available)
+		AttackAnimations = PunchSettings and PunchSettings.AttackAnimations or {},
+		AttackSounds = PunchSettings and PunchSettings.AttackSounds or {},
 	}
 
 	local configValue = Instance.new("StringValue")
@@ -212,10 +225,18 @@ local function initializeNPCData(npcID, config, position)
 			MeleeOffsetRange = config.MeleeOffsetRange or 5,
 			EnableIdleWander = config.EnableIdleWander ~= false,
 			EnableCombatMovement = config.EnableCombatMovement ~= false,
+			UsePathfinding = config.UsePathfinding ~= false,
 			MaxWanderRadius = config.MaxWanderRadius or OptimizationConfig.ExploitMitigation.DEFAULT_MAX_WANDER_RADIUS,
 			CustomData = config.CustomData or {},
 			ClientRenderData = config.ClientRenderData or {},
 		},
+
+		-- Combat
+		AttackDamage = config.AttackDamage or 2,
+		AttackCooldown = config.AttackCooldown or 1.5,
+		AttackRange = config.AttackRange or 6,
+		EnableMeleeAttack = config.EnableMeleeAttack ~= false,
+		InitialAttackCooldown = config.InitialAttackCooldown or 3.0,
 
 		-- Client Tracking
 		OwningClient = nil,
@@ -426,6 +447,11 @@ function ClientPhysicsSpawner:DestroyNPC(npcID)
 		NPC_Service.Components.ServerFallbackSimulator.CleanupNPC(npcID)
 	end
 
+	-- Notify combat system
+	if NPC_Service.Components.ClientPhysicsCombat then
+		NPC_Service.Components.ClientPhysicsCombat.CleanupNPC(npcID)
+	end
+
 	-- Remove from registry
 	NPC_Service.ActiveClientPhysicsNPCs[npcID] = nil
 
@@ -492,6 +518,17 @@ end
 
 function ClientPhysicsSpawner.Init()
 	NPC_Service = Knit.GetService("NPC_Service")
+
+	-- Load PunchSettings if available (optional - for attack animation/sound config)
+	local combatFolder = ReplicatedStorage:FindFirstChild("SharedSource")
+		and ReplicatedStorage.SharedSource:FindFirstChild("Datas")
+		and ReplicatedStorage.SharedSource.Datas:FindFirstChild("Combat")
+	if combatFolder then
+		local punchModule = combatFolder:FindFirstChild("PunchSettings")
+		if punchModule then
+			PunchSettings = require(punchModule)
+		end
+	end
 
 	-- Create ActiveNPCs folder in ReplicatedStorage if it doesn't exist
 	ActiveNPCsFolder = ReplicatedStorage:FindFirstChild("ActiveNPCs")
