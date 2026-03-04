@@ -512,6 +512,33 @@ function ClientPhysicsSpawner:SetDestination(npcID, destination)
 	end
 end
 
+--[[
+	Set walk speed for a client-physics NPC
+
+	@param npcID string - The NPC ID
+	@param speed number - New walk speed in studs/second
+]]
+function ClientPhysicsSpawner:SetWalkSpeed(npcID, speed)
+	local npcData = self:GetNPCData(npcID)
+	if not npcData then
+		return
+	end
+
+	npcData.Config.WalkSpeed = speed
+
+	local npcFolder = ActiveNPCsFolder:FindFirstChild(npcID)
+	if npcFolder then
+		-- Create or update WalkSpeed value (same pattern as Destination)
+		local walkSpeedValue = npcFolder:FindFirstChild("WalkSpeed")
+		if not walkSpeedValue then
+			walkSpeedValue = Instance.new("NumberValue")
+			walkSpeedValue.Name = "WalkSpeed"
+			walkSpeedValue.Parent = npcFolder
+		end
+		walkSpeedValue.Value = speed
+	end
+end
+
 function ClientPhysicsSpawner.Start()
 	-- Component start logic
 end

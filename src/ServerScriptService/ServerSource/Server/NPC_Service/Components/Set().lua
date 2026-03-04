@@ -78,8 +78,28 @@ function Set:SetMovementState(npcModel, state)
 end
 
 --[[
+	Set NPC walk speed
+
+	@param npcModel Model - The NPC model
+	@param speed number - New walk speed in studs/second
+]]
+function Set:SetWalkSpeed(npcModel, speed)
+	local npcData = NPC_Service.ActiveNPCs[npcModel]
+	if not npcData then
+		return
+	end
+
+	npcData.WalkSpeed = speed
+
+	local humanoid = npcModel:FindFirstChild("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = speed
+	end
+end
+
+--[[
 	Update NPC's custom data
-	
+
 	@param npcModel Model - The NPC model
 	@param key string - Key to update
 	@param value any - Value to set

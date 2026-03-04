@@ -308,7 +308,7 @@ function ClientNPCManager.StartSimulation(npcFolder)
 		table.insert(npcData.Connections, destConnection)
 	end
 
-	-- Watch for dynamically created Destination value (if server creates it after spawn)
+	-- Watch for dynamically created values (if server creates them after spawn)
 	local childAddedConnection = npcFolder.ChildAdded:Connect(function(child)
 		if child.Name == "Destination" and child:IsA("Vector3Value") then
 			local destConnection = child.Changed:Connect(function(newDest)
@@ -326,6 +326,16 @@ function ClientNPCManager.StartSimulation(npcFolder)
 			if child.Value ~= Vector3.zero then
 				npcData.Destination = child.Value
 			end
+		elseif child.Name == "WalkSpeed" and child:IsA("NumberValue") then
+			local wsConnection = child.Changed:Connect(function(newSpeed)
+				if SimulatedNPCs[npcID] and npcData.IsAlive then
+					npcData.Config.WalkSpeed = newSpeed
+				end
+			end)
+			table.insert(npcData.Connections, wsConnection)
+
+			-- Apply initial value
+			npcData.Config.WalkSpeed = child.Value
 		end
 	end)
 	table.insert(npcData.Connections, childAddedConnection)

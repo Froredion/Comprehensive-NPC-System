@@ -107,7 +107,7 @@ local function spawnWaveEnemy()
 
 		-- Stats
 		MaxHealth = 100,
-		WalkSpeed = 16,
+		WalkSpeed = 7,
 		JumpPower = 50,
 
 		-- Behavior - disable automatic behaviors for controlled movement

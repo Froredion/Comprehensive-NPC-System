@@ -153,6 +153,24 @@ function NPC_Service:SetDestination(npcModelOrID, destination)
 end
 
 --[[
+	Set walk speed for NPC
+
+	@param npcModelOrID Model|string - The NPC model (traditional) or NPC ID (UseClientPhysics)
+	@param speed number - New walk speed in studs/second
+]]
+function NPC_Service:SetWalkSpeed(npcModelOrID, speed)
+	if typeof(npcModelOrID) == "string" then
+		-- Client-physics NPC (UseClientPhysics)
+		if NPC_Service.Components.ClientPhysicsSpawner then
+			NPC_Service.Components.ClientPhysicsSpawner:SetWalkSpeed(npcModelOrID, speed)
+		end
+	else
+		-- Traditional server-physics NPC
+		NPC_Service.SetComponent:SetWalkSpeed(npcModelOrID, speed)
+	end
+end
+
+--[[
 	Destroy NPC and cleanup
 
 	@param npcModelOrID Model|string - The NPC model (traditional) or NPC ID (UseClientPhysics)
