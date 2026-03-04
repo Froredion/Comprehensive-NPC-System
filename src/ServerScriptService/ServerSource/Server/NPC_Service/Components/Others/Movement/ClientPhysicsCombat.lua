@@ -173,7 +173,7 @@ local function combatLoop()
 			LastAttackTimes[npcID] = now
 
 			-- Get combo index
-			local maxCombo = #(PunchSettings.AttackAnimations or {})
+			local maxCombo = #(PunchSettings and PunchSettings.AttackAnimations or {})
 			if maxCombo == 0 then maxCombo = 1 end
 			local comboIndex = ComboIndices[npcID] or 1
 
@@ -287,9 +287,9 @@ function ClientPhysicsCombat.HandlePlayerHit(player, npcID, damageType)
 
 	-- Look up damage from damageType
 	local damage
-	if damageType == "punch" then
+	if damageType == "punch" and PunchSettings then
 		damage = PunchSettings.DamagePerHit
-	elseif damageType == "slash" then
+	elseif damageType == "slash" and SlashSettings then
 		damage = SlashSettings.DamagePerHit
 	else
 		damage = 10 -- Default fallback
@@ -347,17 +347,24 @@ function ClientPhysicsCombat.Init()
 	NPC_Service = Knit.GetService("NPC_Service")
 	CombatService = Knit.GetService("CombatService")
 
-	-- Load combat settings
+	-- Load combat settings (optional — may not exist for vanilla NPCs)
 	local datas = ReplicatedStorage:WaitForChild("SharedSource"):WaitForChild("Datas", 10)
-	local combatDatas = datas:WaitForChild("Combat", 10)
-	PunchSettings = require(combatDatas:WaitForChild("PunchSettings", 10))
-	SlashSettings = require(combatDatas:WaitForChild("SlashSettings", 10))
+	if datas then
+		local combatDatas = datas:FindFirstChild("Combat")
+		if combatDatas then
+			local punchModule = combatDatas:FindFirstChild("PunchSettings")
+			if punchModule then PunchSettings = require(punchModule) end
+
+			local slashModule = combatDatas:FindFirstChild("SlashSettings")
+			if slashModule then SlashSettings = require(slashModule) end
+
+			local configModule = combatDatas:FindFirstChild("CombatConfig")
+			if configModule then CombatConfig = require(configModule) end
+		end
+	end
 
 	-- Load KnockbackHandler from CombatService components
-	KnockbackHandler = CombatService.Components.KnockbackHandler
-
-	-- Load CombatConfig for knockback power values
-	CombatConfig = require(combatDatas:WaitForChild("CombatConfig", 10))
+	KnockbackHandler = CombatService and CombatService.Components and CombatService.Components.KnockbackHandler
 end
 
 return ClientPhysicsCombat

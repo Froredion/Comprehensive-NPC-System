@@ -63,7 +63,7 @@ end
 	@return AnimationTrack? - The playing animation track
 ]]
 local function playAttackAnimation(npcHumanoid, comboIndex)
-	local anims = PunchSettings.AttackAnimations or {}
+	local anims = PunchSettings and PunchSettings.AttackAnimations or {}
 	if #anims == 0 then
 		return nil
 	end
@@ -83,7 +83,7 @@ end
 	@param comboIndex number - Current combo index
 ]]
 local function playAttackSound(npcModel, comboIndex)
-	local attackSounds = PunchSettings.AttackSounds or {}
+	local attackSounds = PunchSettings and PunchSettings.AttackSounds or {}
 	if #attackSounds == 0 then
 		return
 	end
@@ -137,7 +137,7 @@ local function meleeAttackThread(npcData)
 	local attackDamage = npcData.AttackDamage or DEFAULT_DAMAGE
 	local attackCooldown = npcData.AttackCooldown or DEFAULT_COOLDOWN
 	local attackRange = npcData.AttackRange or DEFAULT_RANGE
-	local maxCombo = #(PunchSettings.AttackAnimations or {})
+	local maxCombo = #(PunchSettings and PunchSettings.AttackAnimations or {})
 	if maxCombo == 0 then maxCombo = 1 end
 
 	while not npcData.CleanedUp do
@@ -223,7 +223,7 @@ local function meleeAttackThread(npcData)
 		end
 
 		-- 5. Create ClientCast caster on the hand (server raycasts, owner=nil)
-		if not dmgPoint then
+		if not dmgPoint or not ClientCast then
 			continue
 		end
 
@@ -320,16 +320,25 @@ function CombatBehavior.Init()
 	DamageService = Knit.GetService("DamageService")
 	CombatService = Knit.GetService("CombatService")
 
-	-- Load PunchSettings (same animations/sounds as player punches)
+	-- Load PunchSettings (same animations/sounds as player punches) — optional for vanilla NPCs
 	local datas = ReplicatedStorage:WaitForChild("SharedSource"):WaitForChild("Datas", 10)
-	PunchSettings = require(datas:WaitForChild("Combat"):WaitForChild("PunchSettings", 10))
+	if datas then
+		local combat = datas:FindFirstChild("Combat")
+		local punchModule = combat and combat:FindFirstChild("PunchSettings")
+		if punchModule then
+			PunchSettings = require(punchModule)
+		end
+	end
 
-	-- Load KnockbackHandler from CombatService components
-	KnockbackHandler = CombatService.Components.KnockbackHandler
+	-- Load KnockbackHandler from CombatService components (optional)
+	KnockbackHandler = CombatService and CombatService.Components and CombatService.Components.KnockbackHandler
 
-	-- Load ClientCast
+	-- Load ClientCast (optional)
 	local utilities = ReplicatedStorage:WaitForChild("SharedSource"):WaitForChild("Utilities", 10)
-	ClientCast = require(utilities:WaitForChild("ClientCast"))
+	if utilities then
+		local clientCastModule = utilities:FindFirstChild("ClientCast")
+		if clientCastModule then ClientCast = require(clientCastModule) end
+	end
 end
 
 return CombatBehavior
