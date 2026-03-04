@@ -14,6 +14,7 @@ local NPC_Service = Knit.CreateService({
 		NPCJumpTriggered = Knit.CreateSignal(), -- Broadcast when NPC should jump (for testing/manual control)
 		NPCAttackTriggered = Knit.CreateSignal(), -- Broadcast when NPC attacks (for client-side animation)
 		NPCKnockbackTriggered = Knit.CreateSignal(), -- Broadcast when NPC should be knocked back (for client-side offset)
+		NPCDestinationReached = Knit.CreateSignal(), -- Client notifies server when a client-physics NPC reaches its destination
 	},
 
 	-- Registry of all active NPCs (traditional server-physics NPCs)
@@ -21,6 +22,9 @@ local NPC_Service = Knit.CreateService({
 
 	-- Registry for client-physics NPCs (UseClientPhysics = true)
 	ActiveClientPhysicsNPCs = {}, -- [npcID] = npcData
+
+	-- One-shot callbacks for when client-physics NPCs reach their destination
+	_destinationReachedCallbacks = {}, -- [npcID] = callback
 })
 
 ---- Configuration
@@ -220,6 +224,26 @@ function NPC_Service:TriggerJump(npcID)
 	NPC_Service.Client.NPCJumpTriggered:FireAll(npcID)
 end
 
+--[[
+	Register a one-shot callback for when a client-physics NPC reaches its destination.
+	The callback is automatically removed after it fires.
+
+	@param npcID string - The NPC ID
+	@param callback function - Called when the NPC reaches its destination
+]]
+function NPC_Service:OnDestinationReached(npcID, callback)
+	self._destinationReachedCallbacks[npcID] = callback
+end
+
+--[[
+	Remove a destination-reached callback (cleanup for when NPC is destroyed before reaching goal)
+
+	@param npcID string - The NPC ID
+]]
+function NPC_Service:OffDestinationReached(npcID)
+	self._destinationReachedCallbacks[npcID] = nil
+end
+
 ---- Client Methods for UseClientPhysics ----
 
 --[[
@@ -279,7 +303,14 @@ function NPC_Service.Client:ReleaseNPC(player, npcID)
 end
 
 function NPC_Service:KnitStart()
-	-- Post-initialization logic can go here
+	-- Listen for client-physics NPCs reaching their destination
+	self.Client.NPCDestinationReached:Connect(function(player, npcID)
+		local callback = self._destinationReachedCallbacks[npcID]
+		if callback then
+			self._destinationReachedCallbacks[npcID] = nil
+			task.spawn(callback)
+		end
+	end)
 end
 
 function NPC_Service:KnitInit()

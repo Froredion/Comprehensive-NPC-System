@@ -199,46 +199,21 @@ local function moveEnemyThroughWaypoints(enemy, enemyId)
 		NPC_Service:SetDestination(enemy, waypointPos)
 
 		if isClientPhysicsNPC then
-			-- For client-physics NPCs: poll position to check if reached waypoint
-			local BASE_REACH_DISTANCE = 1 -- studs
-			local npcData = NPC_Service:GetClientPhysicsNPCData(enemy)
-			local scale = npcData and npcData.Config and npcData.Config.ClientRenderData and npcData.Config.ClientRenderData.Scale or 1
-			local REACH_DISTANCE = BASE_REACH_DISTANCE * math.max(scale, 0.1)
+			-- For client-physics NPCs: use destination-reached signal from client
 			local MAX_TIME = 30 -- seconds timeout
-			local OptimizationConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.OptimizationConfig)
-			local POLL_INTERVAL = OptimizationConfig.ClientSimulation.POSITION_SYNC_INTERVAL -- Match client sync rate for responsiveness
-			local startTime = tick()
 
-			task.spawn(function()
-				while isNPCValid() and currentWaypointIndex <= #walkpoints do
-					local npcPos = getNPCPosition()
-					if npcPos then
-						local distance = (Vector3.new(npcPos.X, 0, npcPos.Z) - Vector3.new(
-							waypointPos.X,
-							0,
-							waypointPos.Z
-						)).Magnitude
+			NPC_Service:OnDestinationReached(enemy, function()
+				currentWaypointIndex = currentWaypointIndex + 1
+				task.wait()
+				moveToNextWaypoint()
+			end)
 
-						if distance < REACH_DISTANCE then
-							-- Reached waypoint
-							currentWaypointIndex = currentWaypointIndex + 1
-							task.wait() -- Small pause between waypoints
-							moveToNextWaypoint()
-							return
-						end
-					end
-
-					-- Timeout check
-					if tick() - startTime > MAX_TIME then
-						print(
-							string.format("[TD] Enemy %s timeout at waypoint %d", tostring(enemy), currentWaypointIndex)
-						)
-						currentWaypointIndex = currentWaypointIndex + 1
-						moveToNextWaypoint()
-						return
-					end
-
-					task.wait(POLL_INTERVAL) -- Poll at same rate as client position sync for maximum responsiveness
+			-- Timeout fallback (if signal never fires)
+			task.delay(MAX_TIME, function()
+				NPC_Service:OffDestinationReached(enemy)
+				if isNPCValid() and currentWaypointIndex <= #walkpoints then
+					currentWaypointIndex = currentWaypointIndex + 1
+					moveToNextWaypoint()
 				end
 			end)
 		else

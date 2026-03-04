@@ -65,6 +65,7 @@ local ClientPathfinding
 local ClientJumpSimulator
 local ClientMovement
 local OptimizationConfig
+local NPC_Service -- lazy-loaded Knit service for destination-reached signal
 
 ---- Helper to lazily get ClientPathfinding (handles race conditions)
 local function getClientPathfinding()
@@ -76,6 +77,20 @@ local function getClientPathfinding()
 		ClientPathfinding = NPC_Controller.Components.ClientPathfinding
 	end
 	return ClientPathfinding
+end
+
+---- Helper to lazily get NPC_Service (for destination-reached signal)
+local function getNPCService()
+	if NPC_Service then
+		return NPC_Service
+	end
+	local ok, service = pcall(function()
+		return Knit.GetService("NPC_Service")
+	end)
+	if ok and service then
+		NPC_Service = service
+	end
+	return NPC_Service
 end
 
 ---- Constants
@@ -359,6 +374,12 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 						npcData.Destination = nil
 						npcData.MovementState = "Idle"
 						ClientPathfinding.StopPath(npcData)
+
+						-- Notify server that this NPC reached its destination
+						local service = getNPCService()
+						if service and npcData.ID then
+							service.NPCDestinationReached:Fire(npcData.ID)
+						end
 						return
 					end
 					-- Otherwise, keep moving toward the final waypoint
@@ -412,6 +433,12 @@ function ClientNPCSimulator.SimulateMovement(npcData, deltaTime)
 		if distance < 0.01 then
 			npcData.Destination = nil
 			npcData.MovementState = "Idle"
+
+			-- Notify server that this NPC reached its destination
+			local service = getNPCService()
+			if service and npcData.ID then
+				service.NPCDestinationReached:Fire(npcData.ID)
+			end
 			return
 		end
 
