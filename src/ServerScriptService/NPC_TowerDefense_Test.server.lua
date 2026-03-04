@@ -200,7 +200,10 @@ local function moveEnemyThroughWaypoints(enemy, enemyId)
 
 		if isClientPhysicsNPC then
 			-- For client-physics NPCs: poll position to check if reached waypoint
-			local REACH_DISTANCE = 5 -- studs (reduced from 5 to match client's 0.5 stud threshold better)
+			local BASE_REACH_DISTANCE = 1 -- studs
+			local npcData = NPC_Service:GetClientPhysicsNPCData(enemy)
+			local scale = npcData and npcData.Config and npcData.Config.ClientRenderData and npcData.Config.ClientRenderData.Scale or 1
+			local REACH_DISTANCE = BASE_REACH_DISTANCE * math.max(scale, 0.1)
 			local MAX_TIME = 30 -- seconds timeout
 			local OptimizationConfig = require(ReplicatedStorage.SharedSource.Datas.NPCs.OptimizationConfig)
 			local POLL_INTERVAL = OptimizationConfig.ClientSimulation.POSITION_SYNC_INTERVAL -- Match client sync rate for responsiveness
