@@ -279,7 +279,7 @@ local function meleeAttackThread(npcData)
 				TeamCheck = false,
 			}
 
-			local success = DamageService:ApplyDamage(npcModel, hitTarget, damageInfo)
+			local success = DamageService and DamageService:ApplyDamage(npcModel, hitTarget, damageInfo)
 
 			if success then
 				KnockbackHandler:ApplyKnockback(hitTarget, npcHRP.Position)
@@ -319,7 +319,8 @@ end
 
 function CombatBehavior.Init()
 	NPC_Service = Knit.GetService("NPC_Service")
-	DamageService = Knit.GetService("DamageService")
+	local dmgOk, dmgService = pcall(function() return Knit.GetService("DamageService") end)
+	DamageService = dmgOk and dmgService or nil
 	local ok, service = pcall(function() return Knit.GetService("CombatService") end)
 	CombatService = ok and service or nil
 
